@@ -1,0 +1,45 @@
+spring:
+  application:
+    name: city-tech-upgrade
+  datasource:
+    url: "jdbc:mysql://localhost:3306/city_tech_upgrade?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai"
+    username: qiyuan
+    password: qiyuan
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: none
+    database-platform: org.hibernate.dialect.MySQLDialect
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: false
+  sql:
+    init:
+      mode: never
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 40MB
+
+server:
+  port: 8654
+
+app:
+  jwt:
+    secret: city-tech-upgrade-secret-key-change-me-2026
+    expire-seconds: 7200
+  file-storage:
+    base-path: uploads
+    preview-base-path: ""
+    sub-dir-pattern: yyyy/M/d
+  external:
+    qf:
+      enabled: true
+      base-url: "https://try.dg.gov.cn/dgecsp/webapi/api/"
+      policy-name: "新型技改城市平台"
+      policy-pwd: srhkbybw
+      enterprise-api-name: enterprisePortrait
+      sso-api-name: getUserInfoByToken
+
