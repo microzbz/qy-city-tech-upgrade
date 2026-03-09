@@ -61,8 +61,8 @@ public class IndustryService {
         String process = normalizeText(normalizeRequired(processName, "工序名称不能为空"));
         Set<String> merged = new LinkedHashSet<>();
         appendEquipments(merged, processEquipmentMapRepository.findAllByProcessNameAndIndustryCodeIsNullOrderByIdAsc(process));
-        if (StringUtils.hasText(code)) {
-            appendEquipments(merged, processEquipmentMapRepository.findAllByProcessNameAndIndustryCodeOrderByIdAsc(process, code));
+        for (String candidateCode : buildEquipmentIndustryCodes(code)) {
+            appendEquipments(merged, processEquipmentMapRepository.findAllByProcessNameAndIndustryCodeOrderByIdAsc(process, candidateCode));
         }
         return new ArrayList<>(merged);
     }
@@ -274,6 +274,19 @@ public class IndustryService {
         for (ProcessEquipmentMap mapping : mappings) {
             merged.addAll(splitBySeparators(mapping.getEquipmentNamesText(), "[、,，]+"));
         }
+    }
+
+    private List<String> buildEquipmentIndustryCodes(String industryCode) {
+        if (!StringUtils.hasText(industryCode)) {
+            return List.of();
+        }
+        Set<String> codes = new LinkedHashSet<>();
+        String normalizedCode = industryCode.trim();
+        if (normalizedCode.length() >= 2) {
+            codes.add(normalizedCode.substring(0, 2));
+        }
+        codes.add(normalizedCode);
+        return new ArrayList<>(codes);
     }
 
     private List<String> listSpecialModeEquipments(String industryCode, String processNamesText) {
