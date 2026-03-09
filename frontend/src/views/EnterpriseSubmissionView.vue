@@ -33,7 +33,16 @@
         </el-form-item>
         <el-form-item label="主要设备" required>
           <div class="process-box">
-            <div v-if="equipmentOptions.length > 0" class="equipment-by-process">
+            <div v-if="industrySpecialMode && equipmentOptions.length > 0" class="process-box">
+              <el-checkbox-group
+                v-model="form.deviceInfo.selectedEquipments"
+                :disabled="!editable || equipmentLoading"
+                class="process-check-group"
+              >
+                <el-checkbox v-for="e in equipmentOptions" :key="e" :value="e">{{ e }}</el-checkbox>
+              </el-checkbox-group>
+            </div>
+            <div v-else-if="equipmentOptions.length > 0" class="equipment-by-process">
               <div class="equipment-matrix-header">
                 <div class="equipment-matrix-col">工序</div>
                 <div class="equipment-matrix-col">主要设备（可多选）</div>
@@ -77,7 +86,7 @@
             </div>
             <div v-else class="inline-hint">
               <el-text v-if="equipmentLoading" type="info">设备加载中...</el-text>
-              <el-text v-else-if="!form.deviceInfo.selectedProcesses?.length" type="info">请先勾选主要工序</el-text>
+              <el-text v-else-if="!industrySpecialMode && !form.deviceInfo.selectedProcesses?.length" type="info">请先勾选主要工序</el-text>
               <el-text v-else type="info">当前工序暂无可选设备</el-text>
             </div>
             <el-input
@@ -274,6 +283,7 @@ import { useAuthStore } from '../stores/auth'
 const processOptions = ref([])
 const equipmentOptions = ref([])
 const equipmentOptionsByProcess = ref([])
+const industrySpecialMode = ref(false)
 const processLoading = ref(false)
 const equipmentLoading = ref(false)
 const saving = ref(false)
@@ -532,6 +542,7 @@ const loadProcesses = async () => {
   const industryCode = mappingIndustryCode()
   if (!industryCode) {
     processOptions.value = []
+    industrySpecialMode.value = false
     if (form.deviceInfo.selectedProcesses?.length) {
       form.deviceInfo.selectedProcesses = []
     }
@@ -540,7 +551,9 @@ const loadProcesses = async () => {
   processLoading.value = true
   try {
     const res = await http.get('/industry/processes', { params: { industryCode } })
-    processOptions.value = appendOtherOption(res.data || [])
+    const processData = res.data || {}
+    industrySpecialMode.value = !!processData.specialMode
+    processOptions.value = appendOtherOption(processData.processes || [])
     const filtered = (form.deviceInfo.selectedProcesses || []).filter((p) =>
       processOptions.value.includes(p)
     )
@@ -554,7 +567,7 @@ const loadProcesses = async () => {
 
 const loadEquipments = async () => {
   const industryCode = mappingIndustryCode()
-  if (!industryCode || !form.deviceInfo.selectedProcesses?.length) {
+  if (!industryCode || (!industrySpecialMode.value && !form.deviceInfo.selectedProcesses?.length)) {
     equipmentOptions.value = []
     equipmentOptionsByProcess.value = []
     if (form.deviceInfo.selectedEquipments?.length) {
@@ -566,6 +579,17 @@ const loadEquipments = async () => {
   const all = new Set()
   const groups = []
   try {
+    if (industrySpecialMode.value) {
+      const res = await http.get('/industry/equipments', { params: { industryCode } })
+      const options = appendOtherOption(Array.from(new Set((res.data || []).filter((x) => `${x || ''}`.trim()))))
+      equipmentOptions.value = options
+      equipmentOptionsByProcess.value = []
+      const filtered = (form.deviceInfo.selectedEquipments || []).filter((e) => options.includes(e))
+      if (!listEquals(filtered, form.deviceInfo.selectedEquipments || [])) {
+        form.deviceInfo.selectedEquipments = filtered
+      }
+      return
+    }
     for (const p of form.deviceInfo.selectedProcesses) {
       if (p === OTHER_OPTION) {
         continue
@@ -604,6 +628,9 @@ watch(
   async () => {
     if (!form.deviceInfo.selectedProcesses?.includes(OTHER_OPTION)) {
       form.deviceInfo.otherProcess = ''
+    }
+    if (industrySpecialMode.value) {
+      return
     }
     await loadEquipments()
   },

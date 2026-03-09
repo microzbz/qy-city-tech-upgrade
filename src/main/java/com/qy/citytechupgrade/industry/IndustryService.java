@@ -25,8 +25,16 @@ public class IndustryService {
     private final IndustryProcessMapRepository industryProcessMapRepository;
     private final ProcessEquipmentMapRepository processEquipmentMapRepository;
 
-    public List<String> listProcesses(String industryCode) {
+    public IndustryProcessOptionsResponse listProcessOptions(String industryCode) {
         String code = normalizeRequired(industryCode, "行业代码不能为空");
+        Optional<IndustryProcessMap> exactMapping = industryProcessMapRepository.findByIndustryCode(code);
+        if (exactMapping.isPresent() && Boolean.TRUE.equals(exactMapping.get().getSpecialMode())) {
+            return new IndustryProcessOptionsResponse(
+                splitSpecialProcesses(exactMapping.get().getProcessNamesText()),
+                true
+            );
+        }
+
         Set<String> merged = new LinkedHashSet<>();
 
         if (code.length() >= 2) {
@@ -38,16 +46,25 @@ public class IndustryService {
             addProcessesByIndustryCode(merged, code);
         }
 
-        return new ArrayList<>(merged);
+        return new IndustryProcessOptionsResponse(new ArrayList<>(merged), false);
     }
 
     public List<String> listEquipments(String industryCode, String processName) {
-        String process = normalizeRequired(processName, "工序名称不能为空");
-        Optional<ProcessEquipmentMap> mapping = processEquipmentMapRepository.findByProcessName(process);
-        if (mapping.isEmpty()) {
-            return List.of();
+        String code = normalizeOptionalIndustryCode(industryCode);
+        Optional<IndustryProcessMap> exactMapping = StringUtils.hasText(code)
+            ? industryProcessMapRepository.findByIndustryCode(code)
+            : Optional.empty();
+        if (exactMapping.isPresent() && Boolean.TRUE.equals(exactMapping.get().getSpecialMode())) {
+            return listSpecialModeEquipments(code, exactMapping.get().getProcessNamesText());
         }
-        return splitBySeparators(mapping.get().getEquipmentNamesText(), "[、,，]+");
+
+        String process = normalizeText(normalizeRequired(processName, "工序名称不能为空"));
+        Set<String> merged = new LinkedHashSet<>();
+        appendEquipments(merged, processEquipmentMapRepository.findAllByProcessNameAndIndustryCodeIsNullOrderByIdAsc(process));
+        if (StringUtils.hasText(code)) {
+            appendEquipments(merged, processEquipmentMapRepository.findAllByProcessNameAndIndustryCodeOrderByIdAsc(process, code));
+        }
+        return new ArrayList<>(merged);
     }
 
     public PagedResult<IndustryProcessMap> listProcessMappings(String industryCode, String processName, Integer page, Integer size) {
@@ -95,22 +112,28 @@ public class IndustryService {
         industryProcessMapRepository.deleteById(id);
     }
 
-    public PagedResult<ProcessEquipmentMap> listEquipmentMappings(String processName,
+    public PagedResult<ProcessEquipmentMap> listEquipmentMappings(String industryCode,
+                                                                  String processName,
                                                                   String equipmentName,
                                                                   Integer page,
                                                                   Integer size) {
+        String code = normalizeKeyword(industryCode);
         String process = normalizeKeyword(processName);
         String equipment = normalizeKeyword(equipmentName);
         Pageable pageable = buildPageable(
             page,
             size,
             Sort.by(
+                Sort.Order.asc("industryCode"),
                 Sort.Order.asc("processName"),
                 Sort.Order.asc("id")
             )
         );
         Specification<ProcessEquipmentMap> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
+            if (!code.isEmpty()) {
+                predicates.add(cb.like(cb.lower(cb.coalesce(root.get("industryCode"), "")), "%" + code + "%"));
+            }
             if (!process.isEmpty()) {
                 predicates.add(cb.like(cb.lower(root.get("processName")), "%" + process + "%"));
             }
@@ -126,7 +149,7 @@ public class IndustryService {
     public ProcessEquipmentMap createEquipmentMapping(ProcessEquipmentMappingUpsertRequest request) {
         ProcessEquipmentMap entity = new ProcessEquipmentMap();
         applyEquipmentMapping(entity, request);
-        assertUniqueProcessName(entity.getProcessName(), null);
+        assertUniqueEquipmentMapping(entity.getProcessName(), entity.getIndustryCode(), null);
         return saveEquipmentMapping(entity);
     }
 
@@ -134,7 +157,7 @@ public class IndustryService {
         ProcessEquipmentMap entity = processEquipmentMapRepository.findById(id)
             .orElseThrow(() -> new BizException("工序设备映射不存在"));
         applyEquipmentMapping(entity, request);
-        assertUniqueProcessName(entity.getProcessName(), id);
+        assertUniqueEquipmentMapping(entity.getProcessName(), entity.getIndustryCode(), id);
         return saveEquipmentMapping(entity);
     }
 
@@ -157,32 +180,52 @@ public class IndustryService {
         try {
             return processEquipmentMapRepository.save(entity);
         } catch (DataIntegrityViolationException ex) {
-            throw new BizException("该工序已存在设备映射，请直接编辑");
+            throw new BizException("工序设备映射保存失败，请检查数据后重试");
         }
     }
 
-    private void assertUniqueProcessName(String processName, Long selfId) {
-        boolean exists = selfId == null
-            ? processEquipmentMapRepository.existsByProcessName(processName)
-            : processEquipmentMapRepository.existsByProcessNameAndIdNot(processName, selfId);
+    private void assertUniqueEquipmentMapping(String processName, String industryCode, Long selfId) {
+        boolean exists;
+        if (!StringUtils.hasText(industryCode)) {
+            exists = selfId == null
+                ? processEquipmentMapRepository.existsByProcessNameAndIndustryCodeIsNull(processName)
+                : processEquipmentMapRepository.existsByProcessNameAndIndustryCodeIsNullAndIdNot(processName, selfId);
+        } else {
+            exists = selfId == null
+                ? processEquipmentMapRepository.existsByProcessNameAndIndustryCode(processName, industryCode)
+                : processEquipmentMapRepository.existsByProcessNameAndIndustryCodeAndIdNot(processName, industryCode, selfId);
+        }
         if (exists) {
-            throw new BizException("主要工序已存在，请勿重复新增");
+            throw new BizException("相同行业代码下的主要工序已存在，请直接编辑");
         }
     }
 
     private void applyProcessMapping(IndustryProcessMap entity, IndustryProcessMappingUpsertRequest request) {
         entity.setIndustryCode(normalizeRequired(request.getIndustryCode(), "行业代码不能为空"));
         entity.setIndustryName(normalizeRequired(request.getIndustryName(), "行业名称不能为空"));
-        entity.setProcessNamesText(normalizeProcessNamesText(request.getProcessNamesText()));
+        boolean specialMode = Boolean.TRUE.equals(request.getSpecialMode());
+        entity.setSpecialMode(specialMode);
+        entity.setProcessNamesText(specialMode
+            ? normalizeSpecialProcessNamesText(request.getProcessNamesText())
+            : normalizeProcessNamesText(request.getProcessNamesText()));
     }
 
     private void applyEquipmentMapping(ProcessEquipmentMap entity, ProcessEquipmentMappingUpsertRequest request) {
-        entity.setProcessName(normalizeRequired(request.getProcessName(), "主要工序不能为空"));
+        entity.setProcessName(normalizeText(normalizeRequired(request.getProcessName(), "主要工序不能为空")));
+        entity.setIndustryCode(normalizeOptionalIndustryCode(request.getIndustryCode()));
         entity.setEquipmentNamesText(normalizeEquipmentNamesText(request.getEquipmentNamesText()));
     }
 
     private String normalizeProcessNamesText(String raw) {
         List<String> parts = splitBySeparators(raw, "[;；]+");
+        if (parts.isEmpty()) {
+            throw new BizException("主要工序不能为空");
+        }
+        return String.join(";", parts);
+    }
+
+    private String normalizeSpecialProcessNamesText(String raw) {
+        List<String> parts = splitBySeparators(raw, "[、,，;；]+");
         if (parts.isEmpty()) {
             throw new BizException("主要工序不能为空");
         }
@@ -208,7 +251,10 @@ public class IndustryService {
             if (!StringUtils.hasText(item)) {
                 continue;
             }
-            out.add(item.trim());
+            String normalizedItem = normalizeText(item);
+            if (StringUtils.hasText(normalizedItem)) {
+                out.add(normalizedItem);
+            }
         }
         return new ArrayList<>(out);
     }
@@ -221,6 +267,30 @@ public class IndustryService {
         merged.addAll(splitBySeparators(mapping.get().getProcessNamesText(), "[;；]+"));
     }
 
+    private void appendEquipments(Set<String> merged, List<ProcessEquipmentMap> mappings) {
+        if (mappings == null || mappings.isEmpty()) {
+            return;
+        }
+        for (ProcessEquipmentMap mapping : mappings) {
+            merged.addAll(splitBySeparators(mapping.getEquipmentNamesText(), "[、,，]+"));
+        }
+    }
+
+    private List<String> listSpecialModeEquipments(String industryCode, String processNamesText) {
+        Set<String> merged = new LinkedHashSet<>();
+        if (StringUtils.hasText(industryCode)) {
+            appendEquipments(merged, processEquipmentMapRepository.findAllByIndustryCodeOrderByIdAsc(industryCode));
+        }
+        if (merged.isEmpty() && StringUtils.hasText(processNamesText)) {
+            appendEquipments(merged, processEquipmentMapRepository.findAllByProcessNameOrderByIdAsc(normalizeText(processNamesText)));
+        }
+        return new ArrayList<>(merged);
+    }
+
+    private List<String> splitSpecialProcesses(String raw) {
+        return splitBySeparators(raw, "[、,，;；]+");
+    }
+
     private String normalizeRequired(String value, String message) {
         if (!StringUtils.hasText(value)) {
             throw new BizException(message);
@@ -228,8 +298,27 @@ public class IndustryService {
         return value.trim();
     }
 
+    private String normalizeOptionalIndustryCode(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        return value.trim();
+    }
+
     private String normalizeKeyword(String value) {
-        return value == null ? "" : value.trim().toLowerCase();
+        return value == null ? "" : normalizeText(value).toLowerCase();
+    }
+
+    private String normalizeText(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+            .replace("\u200B", "")
+            .replace("\u200C", "")
+            .replace("\u200D", "")
+            .replace("\uFEFF", "")
+            .trim();
     }
 
     private Pageable buildPageable(Integer page, Integer size, Sort sort) {

@@ -27,13 +27,13 @@ public class IndustryController {
     private final AuditService auditService;
 
     @GetMapping("/processes")
-    public ApiResponse<List<String>> processes(@RequestParam String industryCode) {
-        return ApiResponse.success(industryService.listProcesses(industryCode));
+    public ApiResponse<IndustryProcessOptionsResponse> processes(@RequestParam String industryCode) {
+        return ApiResponse.success(industryService.listProcessOptions(industryCode));
     }
 
     @GetMapping("/equipments")
     public ApiResponse<List<String>> equipments(@RequestParam String industryCode,
-                                                @RequestParam String processName) {
+                                                @RequestParam(required = false) String processName) {
         return ApiResponse.success(industryService.listEquipments(industryCode, processName));
     }
 
@@ -75,11 +75,12 @@ public class IndustryController {
 
     @GetMapping("/admin/equipment-mappings")
     @PreAuthorize("hasRole('SYS_ADMIN')")
-    public ApiResponse<PagedResult<ProcessEquipmentMap>> listEquipmentMappings(@RequestParam(required = false) String processName,
+    public ApiResponse<PagedResult<ProcessEquipmentMap>> listEquipmentMappings(@RequestParam(required = false) String industryCode,
+                                                                                @RequestParam(required = false) String processName,
                                                                                 @RequestParam(required = false) String equipmentName,
                                                                                 @RequestParam(defaultValue = "1") Integer page,
                                                                                 @RequestParam(defaultValue = "20") Integer size) {
-        return ApiResponse.success(industryService.listEquipmentMappings(processName, equipmentName, page, size));
+        return ApiResponse.success(industryService.listEquipmentMappings(industryCode, processName, equipmentName, page, size));
     }
 
     @PostMapping("/admin/equipment-mappings")

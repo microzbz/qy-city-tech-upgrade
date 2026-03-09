@@ -13,4 +13,6 @@ public class IndustryProcessMappingUpsertRequest {
 
     @NotBlank(message = "主要工序不能为空")
     private String processNamesText;
+
+    private Boolean specialMode;
 }

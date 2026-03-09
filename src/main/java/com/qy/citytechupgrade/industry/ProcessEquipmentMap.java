@@ -25,6 +25,9 @@ public class ProcessEquipmentMap {
     @Column(name = "process_name", nullable = false, length = 1000)
     private String processName;
 
+    @Column(name = "industry_code", length = 10)
+    private String industryCode;
+
     @Column(name = "equipment_names_text", nullable = false, length = 2000)
     private String equipmentNamesText;
 

@@ -31,6 +31,9 @@ public class IndustryProcessMap {
     @Column(name = "process_names_text", nullable = false, length = 2000)
     private String processNamesText;
 
+    @Column(name = "special_mode", nullable = false)
+    private Boolean specialMode;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
@@ -40,6 +43,9 @@ public class IndustryProcessMap {
     @PrePersist
     public void prePersist() {
         LocalDateTime now = LocalDateTime.now();
+        if (specialMode == null) {
+            specialMode = Boolean.FALSE;
+        }
         if (createdAt == null) {
             createdAt = now;
         }

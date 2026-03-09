@@ -20,6 +20,11 @@
           <el-table-column prop="id" label="ID" width="80" />
           <el-table-column prop="industryCode" label="行业代码" width="120" />
           <el-table-column prop="industryName" label="行业名称" min-width="180" />
+          <el-table-column label="特殊模式" width="120">
+            <template #default="scope">
+              {{ scope.row.specialMode ? '是' : '否' }}
+            </template>
+          </el-table-column>
           <el-table-column prop="processNamesText" label="主要工序（分号分隔）" min-width="520" />
           <el-table-column label="操作" width="130" fixed="right">
             <template #default="scope">
@@ -48,12 +53,19 @@
             <el-form-item label="行业名称" prop="industryName">
               <el-input v-model="processForm.industryName" />
             </el-form-item>
+            <el-form-item label="特殊模式">
+              <el-switch
+                v-model="processForm.specialMode"
+                active-text="是"
+                inactive-text="否"
+              />
+            </el-form-item>
             <el-form-item label="主要工序串" prop="processNamesText">
               <el-input
                 v-model="processForm.processNamesText"
                 type="textarea"
                 :rows="4"
-                placeholder="请按分号分隔，例如：切割;焊接;装配"
+                :placeholder="processForm.specialMode ? '特殊模式下可按逗号或分号分隔，例如：晶圆制造、光刻、刻蚀' : '请按分号分隔，例如：切割;焊接;装配'"
               />
             </el-form-item>
           </el-form>
@@ -66,6 +78,9 @@
 
       <el-tab-pane label="工序-设备" name="equipment">
         <el-form inline>
+          <el-form-item label="行业代码">
+            <el-input v-model="equipmentQuery.industryCode" placeholder="留空表示共性设备" clearable />
+          </el-form-item>
           <el-form-item label="主要工序">
             <el-input v-model="equipmentQuery.processName" placeholder="工序关键词" clearable />
           </el-form-item>
@@ -79,6 +94,11 @@
 
         <el-table :data="equipmentRows" border v-loading="equipmentLoading" style="margin-top: 10px">
           <el-table-column prop="id" label="ID" width="80" />
+          <el-table-column label="行业代码" width="140">
+            <template #default="scope">
+              {{ scope.row.industryCode || '共性' }}
+            </template>
+          </el-table-column>
           <el-table-column prop="processName" label="主要工序" min-width="280" />
           <el-table-column prop="equipmentNamesText" label="主要设备（顿号分隔）" min-width="640" />
           <el-table-column label="操作" width="130" fixed="right">
@@ -102,6 +122,9 @@
 
         <el-dialog v-model="equipmentDialogVisible" title="工序-设备映射" width="720px">
           <el-form ref="equipmentFormRef" :model="equipmentForm" :rules="equipmentRules" label-width="130px">
+            <el-form-item label="行业代码">
+              <el-input v-model="equipmentForm.industryCode" placeholder="留空表示共性设备" />
+            </el-form-item>
             <el-form-item label="主要工序" prop="processName">
               <el-input v-model="equipmentForm.processName" />
             </el-form-item>
@@ -148,6 +171,7 @@ const processQuery = reactive({
 })
 
 const equipmentQuery = reactive({
+  industryCode: '',
   processName: '',
   equipmentName: ''
 })
@@ -167,10 +191,12 @@ const equipmentPager = reactive({
 const processForm = reactive({
   industryCode: '',
   industryName: '',
-  processNamesText: ''
+  processNamesText: '',
+  specialMode: false
 })
 
 const equipmentForm = reactive({
+  industryCode: '',
   processName: '',
   equipmentNamesText: ''
 })
@@ -282,10 +308,12 @@ const resetProcessForm = () => {
   processForm.industryCode = ''
   processForm.industryName = ''
   processForm.processNamesText = ''
+  processForm.specialMode = false
 }
 
 const resetEquipmentForm = () => {
   equipmentEditId.value = null
+  equipmentForm.industryCode = ''
   equipmentForm.processName = ''
   equipmentForm.equipmentNamesText = ''
 }
@@ -298,6 +326,7 @@ const resetProcessQuery = async () => {
 }
 
 const resetEquipmentQuery = async () => {
+  equipmentQuery.industryCode = ''
   equipmentQuery.processName = ''
   equipmentQuery.equipmentName = ''
   equipmentPager.page = 1
@@ -314,6 +343,7 @@ const openProcessEdit = (row) => {
   processForm.industryCode = row.industryCode
   processForm.industryName = row.industryName
   processForm.processNamesText = row.processNamesText
+  processForm.specialMode = !!row.specialMode
   processDialogVisible.value = true
 }
 
@@ -324,6 +354,7 @@ const openEquipmentCreate = () => {
 
 const openEquipmentEdit = (row) => {
   equipmentEditId.value = row.id
+  equipmentForm.industryCode = row.industryCode || ''
   equipmentForm.processName = row.processName
   equipmentForm.equipmentNamesText = row.equipmentNamesText
   equipmentDialogVisible.value = true
@@ -335,7 +366,8 @@ const saveProcess = async () => {
   const payload = {
     industryCode: processForm.industryCode.trim(),
     industryName: processForm.industryName.trim(),
-    processNamesText: processForm.processNamesText.trim()
+    processNamesText: processForm.processNamesText.trim(),
+    specialMode: !!processForm.specialMode
   }
   if (processEditId.value) {
     await http.put(`/industry/admin/process-mappings/${processEditId.value}`, payload)
@@ -351,6 +383,7 @@ const saveEquipment = async () => {
   const ok = await equipmentFormRef.value?.validate().catch(() => false)
   if (!ok) return
   const payload = {
+    industryCode: equipmentForm.industryCode.trim() || null,
     processName: equipmentForm.processName.trim(),
     equipmentNamesText: equipmentForm.equipmentNamesText.trim()
   }

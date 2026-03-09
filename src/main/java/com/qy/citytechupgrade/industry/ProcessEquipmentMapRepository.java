@@ -3,13 +3,23 @@ package com.qy.citytechupgrade.industry;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
-import java.util.Optional;
+import java.util.List;
 
 public interface ProcessEquipmentMapRepository extends JpaRepository<ProcessEquipmentMap, Long>,
     JpaSpecificationExecutor<ProcessEquipmentMap> {
-    Optional<ProcessEquipmentMap> findByProcessName(String processName);
+    List<ProcessEquipmentMap> findAllByIndustryCodeOrderByIdAsc(String industryCode);
 
-    boolean existsByProcessName(String processName);
+    List<ProcessEquipmentMap> findAllByProcessNameAndIndustryCodeIsNullOrderByIdAsc(String processName);
 
-    boolean existsByProcessNameAndIdNot(String processName, Long id);
+    List<ProcessEquipmentMap> findAllByProcessNameAndIndustryCodeOrderByIdAsc(String processName, String industryCode);
+
+    List<ProcessEquipmentMap> findAllByProcessNameOrderByIdAsc(String processName);
+
+    boolean existsByProcessNameAndIndustryCodeIsNull(String processName);
+
+    boolean existsByProcessNameAndIndustryCodeIsNullAndIdNot(String processName, Long id);
+
+    boolean existsByProcessNameAndIndustryCode(String processName, String industryCode);
+
+    boolean existsByProcessNameAndIndustryCodeAndIdNot(String processName, String industryCode, Long id);
 }
