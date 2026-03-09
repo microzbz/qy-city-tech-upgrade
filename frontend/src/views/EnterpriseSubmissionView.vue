@@ -284,6 +284,7 @@ const processOptions = ref([])
 const equipmentOptions = ref([])
 const equipmentOptionsByProcess = ref([])
 const industrySpecialMode = ref(false)
+const processEquipmentQueryMap = ref({})
 const processLoading = ref(false)
 const equipmentLoading = ref(false)
 const saving = ref(false)
@@ -530,6 +531,89 @@ const appendOtherOption = (options) => {
   return values
 }
 
+const normalizeTextOption = (value) => `${value || ''}`.trim()
+
+const extractBaseProcessName = (processName) => {
+  const normalized = normalizeTextOption(processName)
+  if (!normalized) {
+    return ''
+  }
+  const englishIdx = normalized.indexOf('(')
+  const chineseIdx = normalized.indexOf('（')
+  const cutIndexes = [englishIdx, chineseIdx].filter((idx) => idx >= 0)
+  if (cutIndexes.length === 0) {
+    return normalized
+  }
+  return normalized.slice(0, Math.min(...cutIndexes)).trim()
+}
+
+const buildProcessDisplayMeta = (rawProcesses) => {
+  const normalizedProcesses = []
+  const seen = new Set()
+  for (const item of rawProcesses || []) {
+    const normalized = normalizeTextOption(item)
+    if (!normalized || seen.has(normalized)) {
+      continue
+    }
+    seen.add(normalized)
+    normalizedProcesses.push(normalized)
+  }
+
+  const exactSet = new Set(normalizedProcesses)
+  const specificMap = new Map()
+  normalizedProcesses.forEach((processName) => {
+    const baseName = extractBaseProcessName(processName)
+    if (!baseName || baseName === processName || !exactSet.has(baseName)) {
+      return
+    }
+    const specifics = specificMap.get(baseName) || []
+    specifics.push(processName)
+    specificMap.set(baseName, specifics)
+  })
+
+  const hiddenBaseSet = new Set(specificMap.keys())
+  const redirectMap = {}
+  specificMap.forEach((specifics, baseName) => {
+    if (specifics.length === 1) {
+      redirectMap[baseName] = specifics[0]
+    }
+  })
+
+  const displayProcesses = []
+  const queryMap = {}
+  const emitted = new Set()
+  normalizedProcesses.forEach((processName) => {
+    if (hiddenBaseSet.has(processName)) {
+      const specifics = specificMap.get(processName) || []
+      specifics.forEach((specificName) => {
+        if (emitted.has(specificName)) {
+          return
+        }
+        emitted.add(specificName)
+        displayProcesses.push(specificName)
+        queryMap[specificName] = [processName, specificName]
+      })
+      return
+    }
+    const baseName = extractBaseProcessName(processName)
+    if (baseName && baseName !== processName && hiddenBaseSet.has(baseName)) {
+      return
+    }
+    if (emitted.has(processName)) {
+      return
+    }
+    emitted.add(processName)
+    displayProcesses.push(processName)
+    queryMap[processName] = [processName]
+  })
+
+  return {
+    processes: displayProcesses,
+    queryMap,
+    redirectMap
+  }
+}
+
 const mappingIndustryCode = () => {
   const rawCode = `${form.basicInfo.industryCode || ''}`.trim()
   if (!rawCode) {
@@ -543,6 +627,7 @@ const loadProcesses = async () => {
   if (!industryCode) {
     processOptions.value = []
     industrySpecialMode.value = false
+    processEquipmentQueryMap.value = {}
     if (form.deviceInfo.selectedProcesses?.length) {
       form.deviceInfo.selectedProcesses = []
     }
@@ -553,10 +638,16 @@ const loadProcesses = async () => {
     const res = await http.get('/industry/processes', { params: { industryCode } })
     const processData = res.data || {}
     industrySpecialMode.value = !!processData.specialMode
-    processOptions.value = appendOtherOption(processData.processes || [])
-    const filtered = (form.deviceInfo.selectedProcesses || []).filter((p) =>
-      processOptions.value.includes(p)
-    )
+    const processMeta = buildProcessDisplayMeta(processData.processes || [])
+    processEquipmentQueryMap.value = processMeta.queryMap
+    processOptions.value = appendOtherOption(processMeta.processes)
+    const filtered = []
+    for (const processName of form.deviceInfo.selectedProcesses || []) {
+      const mappedName = processMeta.redirectMap[processName] || processName
+      if (processOptions.value.includes(mappedName) && !filtered.includes(mappedName)) {
+        filtered.push(mappedName)
+      }
+    }
     if (!listEquals(filtered, form.deviceInfo.selectedProcesses || [])) {
       form.deviceInfo.selectedProcesses = filtered
     }
@@ -590,14 +681,29 @@ const loadEquipments = async () => {
       }
       return
     }
-    for (const p of form.deviceInfo.selectedProcesses) {
-      if (p === OTHER_OPTION) {
-        continue
-      }
-      const res = await http.get('/industry/equipments', { params: { industryCode, processName: p } })
-      const options = Array.from(new Set((res.data || []).filter((x) => `${x || ''}`.trim())))
-      groups.push({ processName: p, options })
-      options.forEach((x) => all.add(x))
+    const selectedProcesses = (form.deviceInfo.selectedProcesses || []).filter((processName) => processName !== OTHER_OPTION)
+    const groupResults = await Promise.all(selectedProcesses.map(async (processName) => {
+      const queryProcessNames = processEquipmentQueryMap.value[processName] || [processName]
+      const responses = await Promise.all(queryProcessNames.map((queryProcessName) =>
+        http.get('/industry/equipments', { params: { industryCode, processName: queryProcessName } })
+      ))
+      const mergedOptions = []
+      const seenOptions = new Set()
+      responses.forEach((res) => {
+        ;(res.data || []).forEach((option) => {
+          const normalized = normalizeTextOption(option)
+          if (!normalized || seenOptions.has(normalized)) {
+            return
+          }
+          seenOptions.add(normalized)
+          mergedOptions.push(normalized)
+        })
+      })
+      return { processName, options: mergedOptions }
+    }))
+    for (const group of groupResults) {
+      groups.push(group)
+      group.options.forEach((x) => all.add(x))
     }
     equipmentOptionsByProcess.value = groups
     equipmentOptions.value = appendOtherOption([...all])
