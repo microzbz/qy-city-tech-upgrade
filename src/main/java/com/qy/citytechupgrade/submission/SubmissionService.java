@@ -150,6 +150,10 @@ public class SubmissionService {
         return submissionFormRepository.findById(id).orElseThrow(() -> new BizException("填报单不存在"));
     }
 
+    public SubmissionDetailVO getDetailForExport(Long submissionId) {
+        return detail(getByIdOrThrow(submissionId), null);
+    }
+
     @Transactional
     public void updateReviewNode(Long submissionId, SubmissionStatus status, Integer nodeSeq, String nodeName) {
         SubmissionForm form = getByIdOrThrow(submissionId);

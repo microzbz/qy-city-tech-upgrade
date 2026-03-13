@@ -9,6 +9,7 @@ import com.qy.citytechupgrade.utils.SM4Utils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.util.LinkedMultiValueMap;
@@ -75,17 +76,19 @@ public class QfClientService {
         String policyName = require(appProperties.getExternal().getQf().getPolicyName(), "app.external.qf.policy-name 未配置");
         String policyPwd = require(appProperties.getExternal().getQf().getPolicyPwd(), "app.external.qf.policy-pwd 未配置");
         String apiName = require(appProperties.getExternal().getQf().getSsoApiName(), "app.external.qf.sso-api-name 未配置");
-        log.info("[SSO][QF] fetch user start, baseUrl={}, apiName={}, ecspcode.mask={}, policyName={}",
-            baseUrl, apiName, mask(code), policyName);
+        log.info("[SSO][QF] fetch user start, baseUrl={}, apiName={}, ecspcode={}, policyName={}",
+            baseUrl, apiName, code, policyName);
 
         String token = getToken(baseUrl, policyName, policyPwd);
-        log.info("[SSO][QF] platform token acquired, token.mask={}", mask(token));
-        String desRaw = callAccess(baseUrl, token, apiName, "tokenCode=" + code, policyPwd);
-        log.info("[SSO][QF] access des-decrypted payload length={}", desRaw.length());
+        log.info("[SSO][QF] platform token acquired, token={}", token);
+        String desRaw = callAccess(baseUrl, token, apiName, "token=" + code, policyPwd);
+        log.info("[SSO][QF] access des-decrypted payload length={}, payload={}", desRaw.length(), desRaw);
+        String sm4CipherText = extractSsoCipherText(desRaw);
+        log.info("[SSO][QF] extracted SM4 cipher text length={}, cipherText={}", sm4CipherText.length(), sm4CipherText);
         String sm4Key = code.substring(0, 16);
-        log.info("[SSO][QF] sm4 key from ecspcode prefix, key.mask={}", mask(sm4Key));
-        String rawUser = decryptSm4(desRaw, sm4Key);
-        log.info("[SSO][QF] sm4 decrypted json length={}", rawUser.length());
+        log.info("[SSO][QF] sm4 key from ecspcode prefix, key={}", sm4Key);
+        String rawUser = decryptSm4(sm4CipherText, sm4Key);
+        log.info("[SSO][QF] sm4 decrypted json length={}, rawUser={}", rawUser.length(), rawUser);
         Map<String, Object> userMap = parseObjectMap(rawUser, "解析SSO用户信息失败");
         if (!hasValidSsoUserInfo(userMap)) {
             log.warn("[SSO][QF] parsed user info invalid, keys={}", userMap.keySet());
@@ -103,7 +106,7 @@ public class QfClientService {
 
         String time = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH:mm:ss.SSS"));
         String sign = cryptoUtils.md5Lower32(time + policyName + policyPwd);
-        log.info("[SSO][QF] requesting /token, time={}, sign.mask={}", time, mask(sign));
+        log.info("[SSO][QF] requesting /token, time={}, sign={}", time, sign);
 
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("time", time);
@@ -117,13 +120,13 @@ public class QfClientService {
         }
         cachedToken = String.valueOf(json.get("data"));
         tokenExpireAt = LocalDateTime.now().plusHours(2);
-        log.info("[SSO][QF] /token success, token.mask={}, expireAt={}", mask(cachedToken), tokenExpireAt);
+        log.info("[SSO][QF] /token success, token={}, expireAt={}", cachedToken, tokenExpireAt);
         return cachedToken;
     }
 
     private String callAccess(String baseUrl, String token, String apiName, String rawData, String policyPwd) {
-        log.info("[SSO][QF] requesting /access, apiName={}, rawData.mask={}, token.mask={}",
-            apiName, mask(rawData), mask(token));
+        log.info("[SSO][QF] requesting /access, apiName={}, rawData={}, token={}",
+            apiName, rawData, token);
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("token", token);
         form.add("apiName", apiName);
@@ -139,7 +142,7 @@ public class QfClientService {
             throw new BizException("企服平台返回空数据");
         }
         String decrypted = cryptoUtils.desDecrypt(String.valueOf(data), policyPwd);
-        log.info("[SSO][QF] /access data DES decrypt success, length={}", decrypted.length());
+        log.info("[SSO][QF] /access data DES decrypt success, length={}, data={}", decrypted.length(), decrypted);
         return decrypted;
     }
 
@@ -147,8 +150,15 @@ public class QfClientService {
         org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
         org.springframework.http.HttpEntity<MultiValueMap<String, String>> req = new org.springframework.http.HttpEntity<>(form, headers);
-        String body = restTemplate.postForObject(url, req, String.class);
-        log.info("[SSO][QF] POST {} response body length={}", url, body == null ? 0 : body.length());
+        log.info("[SSO][QF] POST request url={}, headers={}, form={}", url, headers, form.toSingleValueMap());
+        ResponseEntity<String> response = restTemplate.postForEntity(url, req, String.class);
+        String body = response.getBody();
+        log.info("[SSO][QF] POST response url={}, status={}, headers={}, bodyLength={}, body={}",
+            url,
+            response.getStatusCode().value(),
+            response.getHeaders(),
+            body == null ? 0 : body.length(),
+            body);
         try {
             return objectMapper.readValue(body, new TypeReference<>() {
             });
@@ -200,6 +210,38 @@ public class QfClientService {
                 throw new BizException("SM4解密用户信息失败");
             }
         }
+    }
+
+    private String extractSsoCipherText(String desRaw) {
+        if (!StringUtils.hasText(desRaw)) {
+            throw new BizException("企服平台未返回用户信息");
+        }
+        String trimmed = desRaw.trim();
+        if (!(trimmed.startsWith("{") || trimmed.startsWith("["))) {
+            return trimmed;
+        }
+        try {
+            Object parsed = objectMapper.readValue(trimmed, Object.class);
+            if (parsed instanceof Map<?, ?> map) {
+                Object code = map.get("code");
+                Object msg = map.get("msg");
+                if (code != null && !"1".equals(String.valueOf(code))) {
+                    String message = StringUtils.hasText(String.valueOf(msg))
+                        ? String.valueOf(msg)
+                        : "code=" + code;
+                    throw new BizException("企服平台未返回有效SSO数据: " + message);
+                }
+                Object data = map.get("data");
+                if (!StringUtils.hasText(String.valueOf(data))) {
+                    throw new BizException("企服平台返回成功但缺少SSO密文数据");
+                }
+                return String.valueOf(data).trim();
+            }
+        } catch (BizException e) {
+            throw e;
+        } catch (Exception ignored) {
+        }
+        return trimmed;
     }
 
     private boolean hasValidSsoUserInfo(Map<String, Object> userMap) {
@@ -276,14 +318,4 @@ public class QfClientService {
         return val.trim();
     }
 
-    private String mask(String text) {
-        if (!StringUtils.hasText(text)) {
-            return "***";
-        }
-        String source = text.trim();
-        if (source.length() <= 8) {
-            return source.charAt(0) + "***" + source.charAt(source.length() - 1);
-        }
-        return source.substring(0, 4) + "***" + source.substring(source.length() - 4);
-    }
 }

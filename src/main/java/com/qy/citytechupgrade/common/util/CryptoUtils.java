@@ -7,7 +7,7 @@ import javax.crypto.Cipher;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.Base64;
+import java.security.Key;
 
 @Component
 public class CryptoUtils {
@@ -32,77 +32,58 @@ public class CryptoUtils {
 
     public String desEncrypt(String text, String keyText) {
         try {
+            Key key = getDesKey(keyText);
             Cipher cipher = Cipher.getInstance("DES/ECB/PKCS5Padding");
-            SecretKeySpec key = new SecretKeySpec(normalizeDesKey(keyText), "DES");
             cipher.init(Cipher.ENCRYPT_MODE, key);
-            byte[] encrypted = cipher.doFinal(text.getBytes(StandardCharsets.UTF_8));
-            return toHex(encrypted);
+            return byteArr2HexStr(cipher.doFinal(text.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception e) {
             throw new BizException("DES加密失败");
         }
     }
 
-    public String desDecrypt(String base64Text, String keyText) {
+    public String desDecrypt(String cipherText, String keyText) {
         try {
+            Key key = getDesKey(keyText);
             Cipher cipher = Cipher.getInstance("DES/ECB/PKCS5Padding");
-            SecretKeySpec key = new SecretKeySpec(normalizeDesKey(keyText), "DES");
             cipher.init(Cipher.DECRYPT_MODE, key);
-            byte[] decoded = decodeCipherText(base64Text);
-            return new String(cipher.doFinal(decoded), StandardCharsets.UTF_8);
+            byte[] decoded = cipher.doFinal(hexStr2ByteArr(cipherText));
+            return new String(decoded, StandardCharsets.UTF_8);
         } catch (Exception e) {
             throw new BizException("DES解密失败");
         }
     }
 
-    private byte[] normalizeDesKey(String keyText) {
+    private Key getDesKey(String keyText) {
         byte[] source = keyText == null ? new byte[0] : keyText.getBytes(StandardCharsets.UTF_8);
         byte[] key = new byte[8];
-        for (int i = 0; i < 8; i++) {
-            key[i] = i < source.length ? source[i] : 0;
+        for (int i = 0; i < source.length && i < key.length; i++) {
+            key[i] = source[i];
         }
-        return key;
+        return new SecretKeySpec(key, "DES");
     }
 
-    private byte[] decodeCipherText(String cipherText) {
-        String normalized = cipherText == null ? "" : cipherText.trim();
-        if (isHex(normalized)) {
-            return fromHex(normalized);
-        }
-        return Base64.getDecoder().decode(normalized);
-    }
-
-    private boolean isHex(String value) {
-        if (value == null || value.isEmpty() || (value.length() % 2 != 0)) {
-            return false;
-        }
-        for (int i = 0; i < value.length(); i++) {
-            char ch = value.charAt(i);
-            boolean ok = (ch >= '0' && ch <= '9')
-                || (ch >= 'a' && ch <= 'f')
-                || (ch >= 'A' && ch <= 'F');
-            if (!ok) {
-                return false;
+    private String byteArr2HexStr(byte[] arrB) {
+        StringBuilder sb = new StringBuilder(arrB.length * 2);
+        for (byte b : arrB) {
+            int value = b;
+            while (value < 0) {
+                value += 256;
             }
-        }
-        return true;
-    }
-
-    private String toHex(byte[] bytes) {
-        StringBuilder sb = new StringBuilder(bytes.length * 2);
-        for (byte b : bytes) {
-            String hex = Integer.toHexString(b & 0xff);
-            if (hex.length() == 1) {
+            if (value < 16) {
                 sb.append('0');
             }
-            sb.append(hex);
+            sb.append(Integer.toString(value, 16));
         }
         return sb.toString();
     }
 
-    private byte[] fromHex(String hex) {
-        byte[] out = new byte[hex.length() / 2];
-        for (int i = 0; i < hex.length(); i += 2) {
-            out[i / 2] = (byte) Integer.parseInt(hex.substring(i, i + 2), 16);
+    private byte[] hexStr2ByteArr(String strIn) {
+        String hex = strIn == null ? "" : strIn.trim();
+        byte[] bytes = hex.getBytes(StandardCharsets.UTF_8);
+        byte[] out = new byte[bytes.length / 2];
+        for (int i = 0; i < bytes.length; i += 2) {
+            String strTmp = new String(bytes, i, 2, StandardCharsets.UTF_8);
+            out[i / 2] = (byte) Integer.parseInt(strTmp, 16);
         }
         return out;
     }

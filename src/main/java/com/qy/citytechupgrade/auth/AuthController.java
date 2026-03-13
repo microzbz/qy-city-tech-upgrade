@@ -30,16 +30,17 @@ public class AuthController {
     @PostMapping("/sso-login")
     public ApiResponse<LoginResponse> ssoLogin(@RequestBody @Valid SsoLoginRequest request) {
         String code = request.getToken();
-        log.info("[SSO] /api/auth/sso-login request received, token.len={}, token.mask={}",
-            code == null ? 0 : code.length(), mask(code));
+        log.info("[SSO] /api/auth/sso-login request received, request={}", request);
         try {
             LoginResponse response = authService.ssoLogin(code);
+            ApiResponse<LoginResponse> apiResponse = ApiResponse.success(response);
             log.info("[SSO] /api/auth/sso-login success, userId={}, username={}",
                 response.getUserInfo() == null ? null : response.getUserInfo().getUserId(),
                 response.getUserInfo() == null ? null : response.getUserInfo().getUsername());
-            return ApiResponse.success(response);
+            log.info("[SSO] /api/auth/sso-login response={}", apiResponse);
+            return apiResponse;
         } catch (Exception e) {
-            log.error("[SSO] /api/auth/sso-login failed, token.mask={}, message={}", mask(code), e.getMessage(), e);
+            log.error("[SSO] /api/auth/sso-login failed, token={}, message={}", code, e.getMessage(), e);
             throw e;
         }
     }
@@ -58,15 +59,5 @@ public class AuthController {
     public ApiResponse<String> logout() {
         auditService.log(SecurityUtils.currentUserId(), "AUTH", "LOGOUT", null, "退出登录");
         return ApiResponse.success("退出成功", "OK");
-    }
-
-    private String mask(String text) {
-        if (text == null || text.isBlank()) {
-            return "***";
-        }
-        if (text.length() <= 8) {
-            return text.charAt(0) + "***" + text.charAt(text.length() - 1);
-        }
-        return text.substring(0, 4) + "***" + text.substring(text.length() - 4);
     }
 }

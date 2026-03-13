@@ -53,4 +53,56 @@ public class EnterpriseService {
             return null;
         }
     }
+
+    public SurveyEnterpriseCodeInfo findSurveyEnterpriseCodeInfo(String enterpriseName) {
+        String name = enterpriseName == null ? null : enterpriseName.trim();
+        if (!StringUtils.hasText(name)) {
+            return null;
+        }
+        try {
+            List<SurveyEnterpriseCodeInfo> items = jdbcTemplate.query(
+                """
+                SELECT enterprise_name,
+                       industry_code,
+                       enterprise_code_first_digit,
+                       enterprise_code_town_digits,
+                       enterprise_code_industry_digits,
+                       enterprise_code_sequence_digits
+                FROM survey_enterprise_list
+                WHERE enterprise_name = ?
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (rs, rowNum) -> new SurveyEnterpriseCodeInfo(
+                    rs.getString("enterprise_name"),
+                    rs.getString("industry_code"),
+                    rs.getString("enterprise_code_first_digit"),
+                    rs.getString("enterprise_code_town_digits"),
+                    rs.getString("enterprise_code_industry_digits"),
+                    rs.getString("enterprise_code_sequence_digits")
+                ),
+                name
+            );
+            return items.isEmpty() ? null : items.get(0);
+        } catch (DataAccessException ex) {
+            return null;
+        }
+    }
+
+    public record SurveyEnterpriseCodeInfo(
+        String enterpriseName,
+        String industryCode,
+        String firstDigit,
+        String townDigits,
+        String industryDigits,
+        String sequenceDigits
+    ) {
+        public String exportCode() {
+            return safe(firstDigit) + safe(townDigits) + safe(industryDigits) + safe(sequenceDigits);
+        }
+
+        private static String safe(String value) {
+            return value == null ? "" : value.trim();
+        }
+    }
 }

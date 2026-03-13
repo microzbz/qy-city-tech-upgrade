@@ -69,9 +69,9 @@ public class AuthService {
 
     @Transactional
     public LoginResponse ssoLogin(String ecspCode) {
-        log.info("[SSO] service start, ecspcode.mask={}, ecspcode.len={}", mask(ecspCode), ecspCode == null ? 0 : ecspCode.length());
+        log.info("[SSO] service start, ecspcode={}, ecspcode.len={}", ecspCode, ecspCode == null ? 0 : ecspCode.length());
         Map<String, Object> userInfo = qfClientService.fetchSsoUserInfo(ecspCode);
-        log.info("[SSO] user info fetched, keys={}", userInfo.keySet());
+        log.info("[SSO] user info fetched, userInfo={}", userInfo);
         SysUser user = upsertSsoUser(userInfo);
         log.info("[SSO] user upsert done, userId={}, username={}, enterpriseId={}", user.getId(), user.getUsername(), user.getEnterpriseId());
 
@@ -116,10 +116,10 @@ public class AuthService {
         if (!StringUtils.hasText(externalId)) {
             throw new BizException("SSO用户标识缺失");
         }
-        log.info("[SSO] resolve externalId={}, usertype={}", mask(externalId), readString(userInfo, "usertype"));
+        log.info("[SSO] resolve externalId={}, usertype={}", externalId, readString(userInfo, "usertype"));
 
-        String username = buildSsoUsername(externalId);
-        String displayName = firstNonBlank(readString(userInfo, "userName"), readString(userInfo, "cn"), username);
+        String username = resolveSsoUsername(userInfo, externalId);
+        String displayName = firstNonBlank(readString(userInfo, "cn"), readString(userInfo, "linkPersonName"), username);
         EnterpriseProfile enterprise = upsertEnterprise(userInfo, externalId);
 
         SysUser user = userService.findByUsername(username).orElseGet(SysUser::new);
@@ -146,15 +146,15 @@ public class AuthService {
         Map<String, Object> enterpriseInfo = resolveEnterpriseInfo(userInfo);
         String creditCode = resolveCreditCode(enterpriseInfo, userInfo, externalId);
         String enterpriseName = firstNonBlank(
-            readString(enterpriseInfo, "userName"),
+            readString(enterpriseInfo, "cn"),
             readString(enterpriseInfo, "enterpriseName"),
             readString(enterpriseInfo, "name"),
-            readString(enterpriseInfo, "cn"),
-            readString(userInfo, "userName"),
             readString(userInfo, "cn"),
+            readString(enterpriseInfo, "userName"),
+            readString(userInfo, "userName"),
             "企服企业_" + externalId
         );
-        log.info("[SSO] enterprise upsert start, creditCode.mask={}, enterpriseName={}", mask(creditCode), enterpriseName);
+        log.info("[SSO] enterprise upsert start, creditCode={}, enterpriseName={}", creditCode, enterpriseName);
 
         EnterpriseProfile enterprise = enterpriseProfileRepository.findByCreditCode(creditCode).orElseGet(EnterpriseProfile::new);
         if (enterprise.getId() == null) {
@@ -186,8 +186,8 @@ public class AuthService {
         }
         enterprise.setDataSource("SSO");
         EnterpriseProfile saved = enterpriseProfileRepository.save(enterprise);
-        log.info("[SSO] enterprise upsert done, id={}, creditCode.mask={}, dataSource={}",
-            saved.getId(), mask(saved.getCreditCode()), saved.getDataSource());
+        log.info("[SSO] enterprise upsert done, id={}, creditCode={}, dataSource={}",
+            saved.getId(), saved.getCreditCode(), saved.getDataSource());
         return saved;
     }
 
@@ -249,13 +249,13 @@ public class AuthService {
         return new HashMap<>();
     }
 
-    private String buildSsoUsername(String externalId) {
-        String safe = sanitize(externalId);
-        String username = "DG_" + safe;
-        if (username.length() <= 64) {
-            return username;
+    private String resolveSsoUsername(Map<String, Object> userInfo, String externalId) {
+        String source = firstNonBlank(readString(userInfo, "userName"), externalId);
+        String safe = sanitize(source);
+        if (safe.length() <= 64) {
+            return safe;
         }
-        return "DG_" + sha256Hex(externalId).substring(0, 61);
+        return sha256Hex(source).substring(0, 64);
     }
 
     private String buildCreditPlaceholder(String key) {
@@ -340,14 +340,4 @@ public class AuthService {
             .build();
     }
 
-    private String mask(String text) {
-        if (!StringUtils.hasText(text)) {
-            return "***";
-        }
-        String source = text.trim();
-        if (source.length() <= 8) {
-            return source.charAt(0) + "***" + source.charAt(source.length() - 1);
-        }
-        return source.substring(0, 4) + "***" + source.substring(source.length() - 4);
-    }
 }
