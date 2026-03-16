@@ -1,5 +1,6 @@
 package com.qy.citytechupgrade.user;
 
+import com.qy.citytechupgrade.common.dto.PagedResult;
 import com.qy.citytechupgrade.common.enums.RoleCode;
 import com.qy.citytechupgrade.common.enums.UserStatus;
 import com.qy.citytechupgrade.common.exception.BizException;
@@ -75,6 +76,7 @@ public class UserService {
         if (set.contains("SYS_ADMIN")) {
             menus.add(menu("users", "用户管理", "/admin/users"));
             menus.add(menu("industry-mappings", "行业映射", "/admin/industry-mappings"));
+            menus.add(menu("survey-enterprises", "调研企业库", "/admin/survey-enterprises"));
             menus.add(menu("submission-options", "填报选项", "/admin/submission-options"));
             menus.add(menu("workflow", "流程模板", "/admin/workflow"));
             menus.add(menu("audit", "审计日志", "/admin/audit-logs"));
@@ -92,11 +94,11 @@ public class UserService {
         return menu;
     }
 
-    public List<UserVO> listUsers() {
+    public PagedResult<UserVO> listUsers(Integer page, Integer size) {
         List<SysRole> roles = sysRoleRepository.findAll();
         Map<Long, String> roleMap = roles.stream().collect(Collectors.toMap(SysRole::getId, SysRole::getRoleCode));
 
-        return sysUserRepository.findAll().stream()
+        List<UserVO> users = sysUserRepository.findAll().stream()
             .map(u -> {
                 List<String> roleCodes = sysUserRoleRepository.findByUserId(u.getId()).stream()
                     .map(SysUserRole::getRoleId)
@@ -107,6 +109,11 @@ public class UserService {
             })
             .filter(vo -> vo.getRoleCodes() == null || vo.getRoleCodes().stream().noneMatch(HIDDEN_ROLE_CODE::equals))
             .toList();
+        int safePage = page == null || page < 1 ? 1 : page;
+        int safeSize = size == null || size < 1 ? 20 : Math.min(size, 100);
+        int fromIndex = Math.min((safePage - 1) * safeSize, users.size());
+        int toIndex = Math.min(fromIndex + safeSize, users.size());
+        return PagedResult.of(users.subList(fromIndex, toIndex), users.size(), safePage, safeSize);
     }
 
     @Transactional

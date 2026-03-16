@@ -23,4 +23,14 @@ public class EnterpriseController {
     public ApiResponse<String> getIndustryCodeByEnterpriseName(@RequestParam String enterpriseName) {
         return ApiResponse.success(enterpriseService.findIndustryCodeByEnterpriseName(enterpriseName));
     }
+
+    @GetMapping("/industry-info")
+    public ApiResponse<EnterpriseService.SurveyIndustryInfo> getIndustryInfoByEnterpriseName(@RequestParam String enterpriseName) {
+        return ApiResponse.success(enterpriseService.findSurveyIndustryInfo(enterpriseName));
+    }
+
+    @GetMapping("/industry-name")
+    public ApiResponse<String> getIndustryNameByIndustryCode(@RequestParam String industryCode) {
+        return ApiResponse.success(enterpriseService.findIndustryNameByIndustryCode(industryCode));
+    }
 }

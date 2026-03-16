@@ -19,6 +19,7 @@ public class ApprovalTaskVO {
     private String taskStatus;
     private String action;
     private String comment;
+    private LocalDateTime submittedAt;
     private LocalDateTime createdAt;
     private LocalDateTime handledAt;
 }

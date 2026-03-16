@@ -7,9 +7,8 @@
         <el-row :gutter="16">
           <el-col :span="12"><el-form-item label="企业名称" required><el-input v-model="form.basicInfo.enterpriseName" :disabled="!editable" @blur="syncIndustryCodeByEnterpriseName"/></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="统一信用代码"><el-input v-model="form.basicInfo.creditCode" :disabled="!editable"/></el-form-item></el-col>
-          <el-col :span="12"><el-form-item label="所属行业代码" required><el-input v-model="form.basicInfo.industryCode" :disabled="!editable" @change="loadProcesses"/></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="所属行业代码" required><el-input v-model="form.basicInfo.industryCode" :disabled="!editable"/></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="所属行业名称"><el-input v-model="form.basicInfo.industryName" :disabled="!editable"/></el-form-item></el-col>
-          <el-col :span="12"><el-form-item label="主营产品"><el-input v-model="form.basicInfo.mainProduct" :disabled="!editable"/></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="企业地址"><el-input v-model="form.basicInfo.address" :disabled="!editable"/></el-form-item></el-col>
         </el-row>
       </section>
@@ -236,6 +235,17 @@
         </div>
       </el-form-item>
 
+      <el-form-item v-if="showAdminActions" class="action-row">
+        <div class="action-bar">
+          <div class="action-buttons">
+            <el-button @click="cancelAdminEdit">取消编辑</el-button>
+            <el-button v-if="showAdminSaveButton" class="save-btn" :loading="saving" @click="save">保存修改</el-button>
+            <el-button class="submit-btn" :loading="submitting" @click="submit">提交修改</el-button>
+          </div>
+          <el-tag class="status-chip" :type="statusTagType">当前状态：{{ statusLabel }}</el-tag>
+        </div>
+      </el-form-item>
+
       <section v-if="showReviewSection" class="form-section-card approval-section-card">
         <div class="form-section-header">审批处理</div>
         <div v-if="showReadonlyReviewMeta" class="review-readonly-meta">
@@ -243,7 +253,8 @@
         </div>
         <el-form-item label="审批意见" :required="canReviewInDetail">
           <el-input
-            v-model="approvalComment"
+            :model-value="reviewCommentText"
+            @update:model-value="onApprovalCommentChange"
             type="textarea"
             :rows="3"
             maxlength="1000"
@@ -275,7 +286,7 @@
 
 <script setup>
 import { reactive, ref, onMounted, computed, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import http from '../api/http'
 import { useAuthStore } from '../stores/auth'
@@ -295,20 +306,36 @@ const attachments = ref([])
 const dirty = ref(false)
 const suppressDirty = ref(false)
 const route = useRoute()
+const router = useRouter()
 const auth = useAuthStore()
 const previewVisible = ref(false)
 const previewUrl = ref('')
 const previewType = ref('iframe')
 const approvalComment = ref('')
 const approvingAction = ref('')
+const adminEditMode = ref(false)
 const reviewHandled = ref(false)
 const reviewTaskDetail = ref(null)
 const detailReviewActionLabel = ref('')
 const detailReviewHandledAt = ref('')
-const editableStatuses = ['DRAFT', 'RETURNED']
+const editableStatuses = ['DRAFT', 'RETURNED', 'REJECTED']
 const isEnterpriseUser = computed(() => auth.roles.includes('ENTERPRISE_USER'))
 const isApproverUser = computed(() => auth.roles.includes('APPROVER_ADMIN') || auth.roles.includes('SYS_ADMIN'))
-const editable = computed(() => isEnterpriseUser.value && editableStatuses.includes(formStatus.value))
+const canAdminEditCurrent = computed(() =>
+  isApproverUser.value &&
+  isDetailView.value &&
+  ['APPROVED', 'RETURNED', 'REJECTED', 'SUBMITTED', 'UNDER_REVIEW'].includes(formStatus.value)
+)
+const showAdminActions = computed(() =>
+  isApproverUser.value &&
+  isDetailView.value &&
+  adminEditMode.value
+)
+const showAdminSaveButton = computed(() => !['APPROVED', 'RETURNED', 'REJECTED'].includes(formStatus.value))
+const editable = computed(() =>
+  (isEnterpriseUser.value && editableStatuses.includes(formStatus.value))
+  || (isApproverUser.value && adminEditMode.value)
+)
 const showEnterpriseActions = computed(() => isEnterpriseUser.value)
 const isDetailView = computed(() => Boolean(route.query.id || route.params.id))
 const reviewTaskId = computed(() => {
@@ -321,6 +348,7 @@ const reviewTaskId = computed(() => {
 })
 const canReviewInDetail = computed(() =>
   isApproverUser.value &&
+  !adminEditMode.value &&
   !reviewHandled.value &&
   reviewTaskId.value !== null &&
   ['SUBMITTED', 'UNDER_REVIEW'].includes(formStatus.value)
@@ -331,18 +359,24 @@ const canReadonlyReviewInDetail = computed(() =>
   reviewTaskDetail.value?.taskStatus === 'DONE' &&
   !canReviewInDetail.value
 )
+const canReadonlyReviewForApprover = computed(() =>
+  isApproverUser.value &&
+  !canReviewInDetail.value &&
+  !canReadonlyReviewInDetail.value &&
+  !!(detailReviewActionLabel.value || approvalComment.value || detailReviewHandledAt.value)
+)
 const canReadonlyReviewForEnterprise = computed(() =>
   isEnterpriseUser.value &&
-  isDetailView.value &&
   formStatus.value !== 'DRAFT'
 )
 const showReviewSection = computed(() =>
   canReviewInDetail.value ||
   canReadonlyReviewInDetail.value ||
+  canReadonlyReviewForApprover.value ||
   canReadonlyReviewForEnterprise.value
 )
 const showReadonlyReviewMeta = computed(() =>
-  canReadonlyReviewInDetail.value || canReadonlyReviewForEnterprise.value
+  canReadonlyReviewInDetail.value || canReadonlyReviewForApprover.value || canReadonlyReviewForEnterprise.value
 )
 const reviewActionLabel = computed(() => {
   if (canReadonlyReviewInDetail.value || canReviewInDetail.value) {
@@ -363,6 +397,15 @@ const reviewHandledAtText = computed(() => {
     return reviewTaskDetail.value?.handledAt || '-'
   }
   return detailReviewHandledAt.value || '-'
+})
+const reviewCommentText = computed(() => {
+  if (approvalComment.value) {
+    return approvalComment.value
+  }
+  if (!canReviewInDetail.value && reviewActionLabel.value === '通过') {
+    return '通过'
+  }
+  return ''
 })
 const OTHER_OPTION = '其他'
 const statusLabelMap = {
@@ -428,6 +471,10 @@ const normalizeOptionRows = (rows) => {
     }))
 }
 
+const onApprovalCommentChange = (value) => {
+  approvalComment.value = value
+}
+
 const resolveOtherOptionName = (rows) => {
   const other = (rows || []).find((item) => item.otherOption === true)
   return other?.optionName || ''
@@ -474,14 +521,25 @@ const syncIndustryCodeByEnterpriseName = async () => {
   const enterpriseName = `${form.basicInfo.enterpriseName || ''}`.trim()
   if (!enterpriseName) {
     form.basicInfo.industryCode = ''
+    form.basicInfo.industryName = ''
     return
   }
-  const res = await http.get('/enterprise/industry-code', { params: { enterpriseName } })
-  const matchedCode = `${res.data || ''}`.trim()
+  const res = await http.get('/enterprise/industry-info', { params: { enterpriseName } })
+  const industryInfo = res.data || {}
+  const matchedCode = `${industryInfo.industryCode || ''}`.trim()
+  const matchedName = `${industryInfo.industryName || ''}`.trim()
   form.basicInfo.industryCode = matchedCode
-  if (!matchedCode) {
+  form.basicInfo.industryName = matchedName
+}
+
+const syncIndustryNameByIndustryCode = async () => {
+  const industryCode = `${form.basicInfo.industryCode || ''}`.trim()
+  if (!industryCode) {
     form.basicInfo.industryName = ''
+    return
   }
+  const res = await http.get('/enterprise/industry-name', { params: { industryCode } })
+  form.basicInfo.industryName = `${res.data || ''}`.trim()
 }
 
 const listEquals = (a = [], b = []) => {
@@ -724,6 +782,7 @@ watch(
     const next = `${val || ''}`.trim()
     const prev = `${oldVal || ''}`.trim()
     if (next === prev) return
+    await syncIndustryNameByIndustryCode()
     await loadProcesses()
     await loadEquipments()
   }
@@ -787,6 +846,14 @@ watch(
     approvalComment.value = ''
     await loadReviewTaskDetail()
   }
+)
+
+watch(
+  () => [route.query.mode, formStatus.value, route.params.id, route.query.id],
+  () => {
+    adminEditMode.value = route.query.mode === 'edit' && canAdminEditCurrent.value
+  },
+  { immediate: true }
 )
 
 watch(
@@ -891,6 +958,50 @@ const validateRequiredSelections = () => {
   return true
 }
 
+const buildSubmissionPayload = () => ({
+  submissionId: submissionId.value,
+  reportYear: new Date().getFullYear(),
+  basicInfo: form.basicInfo,
+  deviceInfo: form.deviceInfo,
+  digitalInfo: form.digitalInfo,
+  rdToolInfo: form.rdToolInfo
+})
+
+const startAdminEdit = () => {
+  if (!canAdminEditCurrent.value) {
+    return
+  }
+  router.push({
+    path: route.path,
+    query: {
+      ...route.query,
+      mode: 'edit'
+    }
+  })
+}
+
+const cancelAdminEdit = async () => {
+  if (dirty.value) {
+    try {
+      await ElMessageBox.confirm('已修改当前填报信息，确定放弃本次编辑吗？', '取消编辑', {
+        type: 'warning',
+        confirmButtonText: '放弃修改',
+        cancelButtonText: '继续编辑'
+      })
+    } catch {
+      return
+    }
+  }
+  const nextQuery = { ...route.query }
+  delete nextQuery.mode
+  await router.replace({
+    path: route.path,
+    query: nextQuery
+  })
+  adminEditMode.value = false
+  await loadCurrent()
+}
+
 const save = async () => {
   if (!validateRequiredBasicInfo()) {
     return false
@@ -900,17 +1011,12 @@ const save = async () => {
   }
   saving.value = true
   try {
-    const payload = {
-      submissionId: submissionId.value,
-      reportYear: new Date().getFullYear(),
-      basicInfo: form.basicInfo,
-      deviceInfo: form.deviceInfo,
-      digitalInfo: form.digitalInfo,
-      rdToolInfo: form.rdToolInfo
-    }
-    const res = await http.post('/submissions/save', payload)
+    const payload = buildSubmissionPayload()
+    const res = isApproverUser.value && adminEditMode.value
+      ? await http.post(`/approvals/submissions/${submissionId.value}/save-edit`, payload)
+      : await http.post('/submissions/save', payload)
     await fillForm(res.data)
-    ElMessage.success('保存成功')
+    ElMessage.success(isApproverUser.value && adminEditMode.value ? '修改已保存' : '保存成功')
     return true
   } catch (e) {
     return false
@@ -920,6 +1026,57 @@ const save = async () => {
 }
 
 const submit = async () => {
+  if (isApproverUser.value && adminEditMode.value) {
+    submitting.value = true
+    try {
+      if (!validateRequiredBasicInfo()) {
+        return
+      }
+      if (!validateOtherInputs()) {
+        return
+      }
+      if (!validateRequiredSelections()) {
+        return
+      }
+      if (!validateRequiredAttachments()) {
+        return
+      }
+      if (!submissionId.value || dirty.value) {
+        const saved = await save()
+        if (!saved) {
+          ElMessage.warning('自动保存失败，请检查后重试')
+          return
+        }
+      }
+      if (!submissionId.value) {
+        ElMessage.warning('保存后未找到填报单，请重试')
+        return
+      }
+      await ElMessageBox.confirm('您已修改该企业的填报信息，确定提交？', '提交修改', {
+        type: 'warning',
+        confirmButtonText: '确定提交',
+        cancelButtonText: '取消'
+      })
+      const res = await http.post(`/approvals/submissions/${submissionId.value}/submit-edit`)
+      const nextQuery = { ...route.query }
+      delete nextQuery.mode
+      await router.replace({
+        path: route.path,
+        query: nextQuery
+      })
+      adminEditMode.value = false
+      await fillForm(res.data)
+      ElMessage.success('修改已提交，当前状态保持已通过')
+      return
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') {
+        throw error
+      }
+      return
+    } finally {
+      submitting.value = false
+    }
+  }
   if (!editable.value) {
     ElMessage.warning('当前状态不可编辑，无法再次提交')
     return

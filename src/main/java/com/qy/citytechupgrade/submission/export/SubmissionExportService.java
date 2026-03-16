@@ -2,14 +2,18 @@ package com.qy.citytechupgrade.submission.export;
 
 import com.openhtmltopdf.pdfboxout.PdfRendererBuilder;
 import com.qy.citytechupgrade.audit.AuditService;
+import com.qy.citytechupgrade.common.dto.PagedResult;
 import com.qy.citytechupgrade.common.enums.SubmissionStatus;
 import com.qy.citytechupgrade.common.exception.BizException;
 import com.qy.citytechupgrade.common.security.CurrentUser;
 import com.qy.citytechupgrade.config.AppProperties;
 import com.qy.citytechupgrade.enterprise.EnterpriseService;
 import com.qy.citytechupgrade.enterprise.EnterpriseService.SurveyEnterpriseCodeInfo;
+import com.qy.citytechupgrade.industry.IndustryService;
+import com.qy.citytechupgrade.industry.IndustryProcessOptionsResponse;
 import com.qy.citytechupgrade.submission.SubmissionAttachment;
 import com.qy.citytechupgrade.submission.SubmissionAttachmentRepository;
+import com.qy.citytechupgrade.submission.SubmissionAttachmentVO;
 import com.qy.citytechupgrade.submission.SubmissionBasicInfoRepository;
 import com.qy.citytechupgrade.submission.SubmissionDetailVO;
 import com.qy.citytechupgrade.submission.SubmissionForm;
@@ -22,6 +26,18 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
 import org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream;
+import org.apache.poi.ss.usermodel.BorderStyle;
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.CellStyle;
+import org.apache.poi.ss.usermodel.FillPatternType;
+import org.apache.poi.ss.usermodel.HorizontalAlignment;
+import org.apache.poi.ss.usermodel.IndexedColors;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.VerticalAlignment;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.xssf.usermodel.XSSFFont;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.util.HtmlUtils;
@@ -38,6 +54,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -55,12 +72,22 @@ public class SubmissionExportService {
     private static final Path CHINESE_FONT_PATH = Paths.get("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf");
     private static final DateTimeFormatter FILE_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private static final DateTimeFormatter DISPLAY_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final String OTHER_OPTION = "其他";
+    private static final Set<SubmissionStatus> APPROVED_RECORD_STATUSES = Set.of(
+        SubmissionStatus.APPROVED,
+        SubmissionStatus.RETURNED,
+        SubmissionStatus.REJECTED
+    );
+    private static final Set<String> DEVICE_ATTACHMENT_TYPES = Set.of("DEVICE_PROOF", "PROOF");
+    private static final Set<String> DIGITAL_ATTACHMENT_TYPES = Set.of("DIGITAL_PROOF");
+    private static final Set<String> RD_TOOL_ATTACHMENT_TYPES = Set.of("RD_TOOL_PROOF");
 
     private final SubmissionFormRepository submissionFormRepository;
     private final SubmissionAttachmentRepository submissionAttachmentRepository;
     private final SubmissionBasicInfoRepository submissionBasicInfoRepository;
     private final SubmissionService submissionService;
     private final EnterpriseService enterpriseService;
+    private final IndustryService industryService;
     private final AuditService auditService;
     private final AppProperties appProperties;
 
@@ -71,11 +98,50 @@ public class SubmissionExportService {
         return thread;
     });
 
-    public List<ApprovedSubmissionListItemVO> listApprovedSubmissions(CurrentUser currentUser) {
+    public PagedResult<ApprovedSubmissionListItemVO> listApprovedSubmissions(
+        String companyName,
+        String status,
+        LocalDateTime startTime,
+        LocalDateTime endTime,
+        Integer page,
+        Integer size,
+        CurrentUser currentUser
+    ) {
         assertApprover(currentUser);
-        return submissionFormRepository.findByStatusInOrderByUpdatedAtDesc(List.of(SubmissionStatus.APPROVED)).stream()
+        List<ApprovedSubmissionListItemVO> items = findApprovedForms(companyName, status, startTime, endTime).stream()
             .map(this::toApprovedListItem)
             .toList();
+        int safePage = page == null || page < 1 ? 1 : page;
+        int safeSize = size == null || size < 1 ? 20 : Math.min(size, 100);
+        int fromIndex = Math.min((safePage - 1) * safeSize, items.size());
+        int toIndex = Math.min(fromIndex + safeSize, items.size());
+        return PagedResult.of(items.subList(fromIndex, toIndex), items.size(), safePage, safeSize);
+    }
+
+    public ReportDownloadFile downloadReport(
+        String companyName,
+        String status,
+        LocalDateTime startTime,
+        LocalDateTime endTime,
+        CurrentUser currentUser
+    ) throws IOException {
+        assertApprover(currentUser);
+        List<SubmissionForm> forms = findApprovedForms(companyName, status, startTime, endTime);
+        String fileName = buildReportFileName();
+        Path reportDir = getExportRoot().resolve("reports");
+        Path reportPath = reportDir.resolve(fileName);
+        Files.createDirectories(reportDir);
+        try (Workbook workbook = new XSSFWorkbook();
+             OutputStream outputStream = Files.newOutputStream(reportPath)) {
+            writeReportWorkbook(workbook, forms);
+            workbook.write(outputStream);
+        }
+        auditService.log(currentUser.getUserId(), "EXPORT", "APPROVED_SUBMISSION_REPORT_EXPORT", fileName,
+            "导出审批记录报表 " + forms.size() + " 条");
+        return ReportDownloadFile.builder()
+            .path(reportPath)
+            .fileName(fileName)
+            .build();
     }
 
     public ApprovedSubmissionExportJobVO createJob(ApprovedSubmissionExportRequest request, CurrentUser currentUser) {
@@ -85,15 +151,15 @@ public class SubmissionExportService {
             .distinct()
             .toList();
         if (submissionIds.isEmpty()) {
-            throw new BizException("请选择至少一条已审批通过记录");
+            throw new BizException("请选择至少一条可导出记录");
         }
 
         List<SubmissionForm> forms = submissionFormRepository.findAllById(submissionIds).stream()
-            .filter(form -> form.getStatus() == SubmissionStatus.APPROVED)
+            .filter(this::isZipExportAllowed)
             .sorted(Comparator.comparing(SubmissionForm::getUpdatedAt).reversed())
             .toList();
         if (forms.size() != submissionIds.size()) {
-            throw new BizException("选中的记录中包含非审批通过单据，请刷新后重试");
+            throw new BizException("选中的记录中包含不可导出单据，请刷新后重试");
         }
 
         ExportJobState job = ExportJobState.create(forms);
@@ -173,7 +239,7 @@ public class SubmissionExportService {
                 : "导出完成");
             job.setFinishedAt(LocalDateTime.now());
             auditService.log(currentUser.getUserId(), "EXPORT", "APPROVED_SUBMISSION_EXPORT", job.getJobId(),
-                "批量导出审批通过单据 " + job.getSuccessCount() + " 条");
+                "批量导出记录 " + job.getSuccessCount() + " 条");
         } catch (Exception ex) {
             job.setStatus("FAILED");
             job.setMessage("导出失败: " + ex.getMessage());
@@ -195,7 +261,7 @@ public class SubmissionExportService {
             throw new BizException("企业未匹配到调研名单编码: " + basicInfo.getEnterpriseName());
         }
 
-        String exportPrefix = buildExportPrefix(codeInfo.exportCode(), basicInfo.getEnterpriseName());
+        String exportPrefix = buildExportPrefix(codeInfo.exportCode());
         String folderName = sanitizeFileName(exportPrefix);
         Path submissionDir = batchRoot.resolve(folderName);
         Path attachmentDir = submissionDir.resolve("附件");
@@ -223,7 +289,7 @@ public class SubmissionExportService {
     }
 
     private void renderPdf(SubmissionDetailVO detail, String exportCode, Path targetPdf) throws IOException {
-        String html = buildPdfHtml(detail, exportCode);
+        String html = normalizeHtmlForPdf(buildPdfHtml(detail, exportCode));
         Files.createDirectories(targetPdf.getParent());
         try (OutputStream outputStream = Files.newOutputStream(targetPdf)) {
             PdfRendererBuilder builder = new PdfRendererBuilder();
@@ -237,6 +303,14 @@ public class SubmissionExportService {
         } catch (Exception ex) {
             throw new BizException("PDF 生成失败: " + ex.getMessage());
         }
+    }
+
+    private String normalizeHtmlForPdf(String html) {
+        if (html == null) {
+            return "";
+        }
+        return html
+            .replace("&nbsp;", "&#160;");
     }
 
     private String buildPdfHtml(SubmissionDetailVO detail, String exportCode) {
@@ -362,26 +436,497 @@ public class SubmissionExportService {
         }
     }
 
+    private List<SubmissionForm> findApprovedForms(
+        String companyName,
+        String status,
+        LocalDateTime startTime,
+        LocalDateTime endTime
+    ) {
+        if (startTime != null && endTime != null && startTime.isAfter(endTime)) {
+            throw new BizException("开始时间不能晚于结束时间");
+        }
+        String normalizedCompanyName = normalizeKeyword(companyName);
+        List<SubmissionStatus> statuses = resolveApprovedStatuses(status);
+        return submissionFormRepository.findByStatusInOrderByUpdatedAtDesc(statuses).stream()
+            .filter(form -> matchesCompanyName(form, normalizedCompanyName))
+            .filter(form -> matchesHandledTime(form, startTime, endTime))
+            .toList();
+    }
+
+    private List<SubmissionStatus> resolveApprovedStatuses(String status) {
+        if (!StringUtils.hasText(status)) {
+            return List.copyOf(APPROVED_RECORD_STATUSES);
+        }
+        SubmissionStatus resolved;
+        try {
+            resolved = SubmissionStatus.valueOf(status.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            throw new BizException("状态参数不正确");
+        }
+        if (!APPROVED_RECORD_STATUSES.contains(resolved)) {
+            throw new BizException("仅支持查询已通过、已退回、已驳回记录");
+        }
+        return List.of(resolved);
+    }
+
+    private boolean matchesHandledTime(SubmissionForm form, LocalDateTime startTime, LocalDateTime endTime) {
+        LocalDateTime compareTime = form.getLastActionAt() != null ? form.getLastActionAt() : form.getUpdatedAt();
+        if (compareTime == null) {
+            return startTime == null && endTime == null;
+        }
+        if (startTime != null && compareTime.isBefore(startTime)) {
+            return false;
+        }
+        if (endTime != null && compareTime.isAfter(endTime)) {
+            return false;
+        }
+        return true;
+    }
+
+    private boolean matchesCompanyName(SubmissionForm form, String normalizedCompanyName) {
+        if (!StringUtils.hasText(normalizedCompanyName)) {
+            return true;
+        }
+        String enterpriseName = submissionBasicInfoRepository.findBySubmissionId(form.getId())
+            .map(info -> info.getEnterpriseName())
+            .orElse("");
+        return enterpriseName.trim().toLowerCase(Locale.ROOT).contains(normalizedCompanyName);
+    }
+
+    private void writeReportWorkbook(Workbook workbook, List<SubmissionForm> forms) {
+        Sheet sheet = workbook.createSheet("审批记录报表");
+        CellStyle headerStyle = buildHeaderStyle(workbook);
+        CellStyle wrapStyle = buildWrapStyle(workbook);
+        List<String> headers = List.of(
+            "单据号",
+            "企业编码",
+            "企业名称",
+            "填报年份",
+            "状态",
+            "审批结果",
+            "审批意见",
+            "所属行业代码",
+            "所属行业名称",
+            "企业地址",
+            "主要工序",
+            "工序-设备对应",
+            "信息化设备",
+            "数字化系统",
+            "研发工具",
+            "技改设备附件名",
+            "数字化系统附件名",
+            "研发工具附件名"
+        );
+        Row headerRow = sheet.createRow(0);
+        for (int i = 0; i < headers.size(); i++) {
+            Cell cell = headerRow.createCell(i);
+            cell.setCellValue(headers.get(i));
+            cell.setCellStyle(headerStyle);
+        }
+
+        int rowIndex = 1;
+        for (SubmissionForm form : forms) {
+            SubmissionDetailVO detail = submissionService.getDetailForExport(form.getId());
+            Row row = sheet.createRow(rowIndex++);
+            SubmissionSaveRequest.BasicInfo basic = detail.getBasicInfo();
+            SubmissionSaveRequest.DeviceInfo device = detail.getDeviceInfo();
+            SubmissionSaveRequest.DigitalInfo digital = detail.getDigitalInfo();
+            SubmissionSaveRequest.RdToolInfo rdTool = detail.getRdToolInfo();
+            List<SubmissionAttachmentVO> attachments = detail.getAttachments() == null ? List.of() : detail.getAttachments();
+            SurveyEnterpriseCodeInfo codeInfo = basic == null || !StringUtils.hasText(basic.getEnterpriseName())
+                ? null
+                : enterpriseService.findSurveyEnterpriseCodeInfo(basic.getEnterpriseName());
+
+            int col = 0;
+            writeCell(row, col++, defaultText(detail.getDocumentNo()), wrapStyle);
+            writeCell(row, col++, defaultText(codeInfo == null ? null : codeInfo.exportCode()), wrapStyle);
+            writeCell(row, col++, defaultText(basic == null ? null : basic.getEnterpriseName()), wrapStyle);
+            writeCell(row, col++, numberText(detail.getReportYear()), wrapStyle);
+            writeCell(row, col++, toStatusLabel(form.getStatus()), wrapStyle);
+            writeCell(row, col++, resolveReviewActionLabel(detail, form), wrapStyle);
+            writeCell(row, col++, resolveReviewComment(detail, form), wrapStyle);
+            writeCell(row, col++, defaultText(basic == null ? null : basic.getIndustryCode()), wrapStyle);
+            writeCell(row, col++, defaultText(basic == null ? null : basic.getIndustryName()), wrapStyle);
+            writeCell(row, col++, defaultText(basic == null ? null : basic.getAddress()), wrapStyle);
+            writeCell(row, col++, buildProcessText(device), wrapStyle);
+            writeCell(row, col++, buildProcessEquipmentText(detail), wrapStyle);
+            writeCell(row, col++, buildInfoDeviceText(device), wrapStyle);
+            writeCell(row, col++, buildDigitalSystemText(digital), wrapStyle);
+            writeCell(row, col++, buildRdToolText(rdTool), wrapStyle);
+            writeCell(row, col++, joinAttachmentNames(attachments, DEVICE_ATTACHMENT_TYPES), wrapStyle);
+            writeCell(row, col++, joinAttachmentNames(attachments, DIGITAL_ATTACHMENT_TYPES), wrapStyle);
+            writeCell(row, col++, joinAttachmentNames(attachments, RD_TOOL_ATTACHMENT_TYPES), wrapStyle);
+            row.setHeightInPoints(54);
+        }
+
+        int[] widths = {18, 14, 28, 10, 10, 10, 24, 14, 18, 28, 18, 40, 22, 24, 24, 24, 24, 24};
+        for (int i = 0; i < widths.length; i++) {
+            sheet.setColumnWidth(i, widths[i] * 256);
+        }
+        sheet.createFreezePane(0, 1);
+    }
+
+    private CellStyle buildHeaderStyle(Workbook workbook) {
+        CellStyle style = workbook.createCellStyle();
+        style.setAlignment(HorizontalAlignment.CENTER);
+        style.setVerticalAlignment(VerticalAlignment.CENTER);
+        style.setFillForegroundColor(IndexedColors.GREY_25_PERCENT.getIndex());
+        style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+        style.setBorderBottom(BorderStyle.THIN);
+        style.setBorderTop(BorderStyle.THIN);
+        style.setBorderLeft(BorderStyle.THIN);
+        style.setBorderRight(BorderStyle.THIN);
+        XSSFFont font = (XSSFFont) workbook.createFont();
+        font.setBold(true);
+        style.setFont(font);
+        return style;
+    }
+
+    private CellStyle buildWrapStyle(Workbook workbook) {
+        CellStyle style = workbook.createCellStyle();
+        style.setVerticalAlignment(VerticalAlignment.TOP);
+        style.setWrapText(true);
+        style.setBorderBottom(BorderStyle.THIN);
+        style.setBorderTop(BorderStyle.THIN);
+        style.setBorderLeft(BorderStyle.THIN);
+        style.setBorderRight(BorderStyle.THIN);
+        return style;
+    }
+
+    private void writeCell(Row row, int columnIndex, String value, CellStyle style) {
+        Cell cell = row.createCell(columnIndex);
+        cell.setCellValue(safeExcelText(value));
+        cell.setCellStyle(style);
+    }
+
+    private String safeExcelText(String value) {
+        String text = defaultText(value);
+        if (!text.isEmpty() && "=+-@".indexOf(text.charAt(0)) >= 0) {
+            return "'" + text;
+        }
+        return text;
+    }
+
+    private String resolveReviewActionLabel(SubmissionDetailVO detail, SubmissionForm form) {
+        if (StringUtils.hasText(detail.getReviewActionLabel())) {
+            return detail.getReviewActionLabel().trim();
+        }
+        return switch (form.getStatus()) {
+            case APPROVED -> "通过";
+            case RETURNED -> "退回修改";
+            case REJECTED -> "驳回";
+            default -> "-";
+        };
+    }
+
+    private String resolveReviewComment(SubmissionDetailVO detail, SubmissionForm form) {
+        if (StringUtils.hasText(detail.getReviewComment())) {
+            return detail.getReviewComment().trim();
+        }
+        return form.getStatus() == SubmissionStatus.APPROVED ? "通过" : "-";
+    }
+
+    private String buildProcessText(SubmissionSaveRequest.DeviceInfo device) {
+        if (device == null) {
+            return "-";
+        }
+        List<String> parts = new ArrayList<>(normalizeOptions(device.getSelectedProcesses()));
+        if (StringUtils.hasText(device.getOtherProcess())) {
+            parts.add("其他：" + device.getOtherProcess().trim());
+        }
+        return joinLines(parts);
+    }
+
+    private String buildInfoDeviceText(SubmissionSaveRequest.DeviceInfo device) {
+        if (device == null) {
+            return "-";
+        }
+        List<String> parts = new ArrayList<>(normalizeOptions(device.getInfoDevices()));
+        if (StringUtils.hasText(device.getOtherInfoDevice())) {
+            parts.add("其他：" + device.getOtherInfoDevice().trim());
+        }
+        return joinLines(parts);
+    }
+
+    private String buildDigitalSystemText(SubmissionSaveRequest.DigitalInfo digital) {
+        if (digital == null) {
+            return "-";
+        }
+        List<String> parts = new ArrayList<>(normalizeOptions(digital.getDigitalSystems()));
+        if (StringUtils.hasText(digital.getOtherSystem())) {
+            parts.add("其他：" + digital.getOtherSystem().trim());
+        }
+        return joinLines(parts);
+    }
+
+    private String buildRdToolText(SubmissionSaveRequest.RdToolInfo rdTool) {
+        if (rdTool == null) {
+            return "-";
+        }
+        List<String> parts = new ArrayList<>(normalizeOptions(rdTool.getRdTools()));
+        if (StringUtils.hasText(rdTool.getOtherTool())) {
+            parts.add("其他：" + rdTool.getOtherTool().trim());
+        }
+        return joinLines(parts);
+    }
+
+    private String buildProcessEquipmentText(SubmissionDetailVO detail) {
+        SubmissionSaveRequest.DeviceInfo device = detail.getDeviceInfo();
+        SubmissionSaveRequest.BasicInfo basic = detail.getBasicInfo();
+        if (device == null) {
+            return "-";
+        }
+        List<String> selectedProcesses = normalizeOptions(device.getSelectedProcesses());
+        List<String> selectedEquipments = normalizeOptions(device.getSelectedEquipments());
+        if (selectedProcesses.isEmpty() && selectedEquipments.isEmpty() && !StringUtils.hasText(device.getOtherEquipment())) {
+            return "-";
+        }
+        String industryCode = basic == null ? null : basic.getIndustryCode();
+        if (!StringUtils.hasText(industryCode)) {
+            return fallbackProcessEquipmentText(selectedProcesses, selectedEquipments, device);
+        }
+
+        IndustryProcessOptionsResponse processOptions;
+        try {
+            processOptions = industryService.listProcessOptions(industryCode.trim());
+        } catch (Exception ex) {
+            return fallbackProcessEquipmentText(selectedProcesses, selectedEquipments, device);
+        }
+        if (processOptions.isSpecialMode()) {
+            List<String> lines = new ArrayList<>();
+            if (!selectedProcesses.isEmpty()) {
+                lines.add("工序：" + String.join("、", selectedProcesses));
+            }
+            List<String> equipmentParts = new ArrayList<>(selectedEquipments);
+            if (StringUtils.hasText(device.getOtherEquipment())) {
+                equipmentParts.add("其他：" + device.getOtherEquipment().trim());
+            }
+            if (!equipmentParts.isEmpty()) {
+                lines.add("设备：" + String.join("、", equipmentParts));
+            }
+            return joinLines(lines);
+        }
+
+        ProcessDisplayMeta processMeta = buildProcessDisplayMeta(processOptions.getProcesses());
+        Set<String> remainingEquipments = new LinkedHashSet<>(selectedEquipments);
+        List<String> lines = new ArrayList<>();
+        for (String processName : selectedProcesses) {
+            List<String> queryNames = processMeta.queryMap().getOrDefault(processName, List.of(processName));
+            Set<String> processEquipments = new LinkedHashSet<>();
+            for (String queryName : queryNames) {
+                processEquipments.addAll(industryService.listEquipments(industryCode.trim(), queryName));
+            }
+            List<String> matched = remainingEquipments.stream()
+                .filter(processEquipments::contains)
+                .toList();
+            matched.forEach(remainingEquipments::remove);
+            lines.add(processName + "：" + (matched.isEmpty() ? "-" : String.join("、", matched)));
+        }
+        if (StringUtils.hasText(device.getOtherProcess())) {
+            lines.add("其他工序：" + device.getOtherProcess().trim());
+        }
+        if (StringUtils.hasText(device.getOtherEquipment())) {
+            lines.add("其他设备：" + device.getOtherEquipment().trim());
+        }
+        if (!remainingEquipments.isEmpty()) {
+            lines.add("未匹配工序设备：" + String.join("、", remainingEquipments));
+        }
+        return joinLines(lines);
+    }
+
+    private String fallbackProcessEquipmentText(
+        List<String> selectedProcesses,
+        List<String> selectedEquipments,
+        SubmissionSaveRequest.DeviceInfo device
+    ) {
+        List<String> lines = new ArrayList<>();
+        if (!selectedProcesses.isEmpty()) {
+            lines.add("工序：" + String.join("、", selectedProcesses));
+        }
+        if (!selectedEquipments.isEmpty()) {
+            lines.add("设备：" + String.join("、", selectedEquipments));
+        }
+        if (StringUtils.hasText(device.getOtherProcess())) {
+            lines.add("其他工序：" + device.getOtherProcess().trim());
+        }
+        if (StringUtils.hasText(device.getOtherEquipment())) {
+            lines.add("其他设备：" + device.getOtherEquipment().trim());
+        }
+        return joinLines(lines);
+    }
+
+    private String joinAttachmentNames(List<SubmissionAttachmentVO> attachments, Set<String> attachmentTypes) {
+        if (attachments == null || attachments.isEmpty()) {
+            return "-";
+        }
+        List<String> names = attachments.stream()
+            .filter(attachment -> attachmentTypes.contains(attachment.getAttachmentType()))
+            .map(SubmissionAttachmentVO::getOriginalFileName)
+            .filter(StringUtils::hasText)
+            .distinct()
+            .toList();
+        return names.isEmpty() ? "-" : String.join("\n", names);
+    }
+
+    private List<String> normalizeOptions(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return List.of();
+        }
+        LinkedHashSet<String> normalized = new LinkedHashSet<>();
+        for (String value : values) {
+            if (!StringUtils.hasText(value)) {
+                continue;
+            }
+            String text = value.trim();
+            if (OTHER_OPTION.equals(text)) {
+                continue;
+            }
+            normalized.add(text);
+        }
+        return new ArrayList<>(normalized);
+    }
+
+    private String joinLines(List<String> lines) {
+        List<String> normalized = lines.stream()
+            .filter(StringUtils::hasText)
+            .map(String::trim)
+            .filter(StringUtils::hasText)
+            .toList();
+        return normalized.isEmpty() ? "-" : String.join("\n", normalized);
+    }
+
+    private String formatDateTime(LocalDateTime value) {
+        return value == null ? "-" : value.format(DISPLAY_TIME_FORMAT);
+    }
+
+    private String numberText(Number value) {
+        return value == null ? "-" : String.valueOf(value);
+    }
+
+    private String defaultText(String value) {
+        return StringUtils.hasText(value) ? value.trim() : "-";
+    }
+
+    private String normalizeKeyword(String value) {
+        return StringUtils.hasText(value) ? value.trim().toLowerCase(Locale.ROOT) : null;
+    }
+
+    private String buildReportFileName() {
+        return "审批记录报表_" + LocalDateTime.now().format(FILE_TIME_FORMAT) + ".xlsx";
+    }
+
+    private ProcessDisplayMeta buildProcessDisplayMeta(List<String> rawProcesses) {
+        List<String> normalizedProcesses = normalizeOptions(rawProcesses);
+        Set<String> exactSet = new LinkedHashSet<>(normalizedProcesses);
+        Map<String, List<String>> specificMap = new LinkedHashMap<>();
+        for (String processName : normalizedProcesses) {
+            String baseName = extractBaseProcessName(processName);
+            if (!StringUtils.hasText(baseName) || baseName.equals(processName) || !exactSet.contains(baseName)) {
+                continue;
+            }
+            specificMap.computeIfAbsent(baseName, key -> new ArrayList<>()).add(processName);
+        }
+
+        Set<String> hiddenBaseSet = new LinkedHashSet<>(specificMap.keySet());
+        Map<String, List<String>> queryMap = new LinkedHashMap<>();
+        Set<String> emitted = new LinkedHashSet<>();
+        for (String processName : normalizedProcesses) {
+            if (hiddenBaseSet.contains(processName)) {
+                for (String specificName : specificMap.getOrDefault(processName, List.of())) {
+                    if (emitted.add(specificName)) {
+                        queryMap.put(specificName, List.of(processName, specificName));
+                    }
+                }
+                continue;
+            }
+            String baseName = extractBaseProcessName(processName);
+            if (StringUtils.hasText(baseName) && !baseName.equals(processName) && hiddenBaseSet.contains(baseName)) {
+                continue;
+            }
+            if (emitted.add(processName)) {
+                queryMap.put(processName, List.of(processName));
+            }
+        }
+        return new ProcessDisplayMeta(queryMap);
+    }
+
+    private String extractBaseProcessName(String processName) {
+        if (!StringUtils.hasText(processName)) {
+            return "";
+        }
+        String normalized = processName.trim();
+        int englishIdx = normalized.indexOf('(');
+        int chineseIdx = normalized.indexOf('（');
+        int cutIndex = -1;
+        if (englishIdx >= 0 && chineseIdx >= 0) {
+            cutIndex = Math.min(englishIdx, chineseIdx);
+        } else if (englishIdx >= 0) {
+            cutIndex = englishIdx;
+        } else if (chineseIdx >= 0) {
+            cutIndex = chineseIdx;
+        }
+        return cutIndex < 0 ? normalized : normalized.substring(0, cutIndex).trim();
+    }
+
     private ApprovedSubmissionListItemVO toApprovedListItem(SubmissionForm form) {
+        SubmissionDetailVO detail = submissionService.getDetailForExport(form.getId());
         String enterpriseName = submissionBasicInfoRepository.findBySubmissionId(form.getId())
             .map(info -> info.getEnterpriseName())
             .orElse(null);
         String documentNo = form.getDocumentNo();
         if (!StringUtils.hasText(documentNo)) {
-            documentNo = submissionService.getDetailForExport(form.getId()).getDocumentNo();
+            documentNo = detail.getDocumentNo();
         }
         SurveyEnterpriseCodeInfo codeInfo = enterpriseService.findSurveyEnterpriseCodeInfo(enterpriseName);
-        boolean exportable = codeInfo != null && StringUtils.hasText(codeInfo.exportCode());
+        boolean exportable = isListExportable(form.getStatus(), codeInfo);
         return ApprovedSubmissionListItemVO.builder()
             .submissionId(form.getId())
             .documentNo(documentNo)
             .reportYear(form.getReportYear())
             .enterpriseName(enterpriseName)
+            .status(form.getStatus().name())
+            .statusLabel(toStatusLabel(form.getStatus()))
+            .reviewActionLabel(detail.getReviewActionLabel())
+            .reviewComment(detail.getReviewComment())
             .exportable(exportable)
-            .exportHint(exportable ? "可导出" : "未匹配到调研企业编码")
+            .exportHint(resolveExportHint(form.getStatus(), exportable))
             .submittedAt(form.getSubmittedAt())
-            .approvedAt(form.getLastActionAt())
+            .reviewHandledAt(detail.getReviewHandledAt())
             .build();
+    }
+
+    private String resolveExportHint(SubmissionStatus status, boolean exportable) {
+        if (status == SubmissionStatus.RETURNED) {
+            return "已退回，不可导出";
+        }
+        return exportable ? "可导出" : "未匹配到调研企业编码";
+    }
+
+    private boolean isListExportable(SubmissionStatus status, SurveyEnterpriseCodeInfo codeInfo) {
+        return isZipExportAllowed(status)
+            && codeInfo != null
+            && StringUtils.hasText(codeInfo.exportCode());
+    }
+
+    private boolean isZipExportAllowed(SubmissionForm form) {
+        return isZipExportAllowed(form.getStatus());
+    }
+
+    private boolean isZipExportAllowed(SubmissionStatus status) {
+        return status == SubmissionStatus.APPROVED || status == SubmissionStatus.REJECTED;
+    }
+
+    private String toStatusLabel(SubmissionStatus status) {
+        if (status == null) {
+            return "-";
+        }
+        return switch (status) {
+            case APPROVED -> "已通过";
+            case RETURNED -> "已退回";
+            case REJECTED -> "已驳回";
+            case DRAFT -> "草稿";
+            case SUBMITTED, UNDER_REVIEW -> "审批中";
+        };
     }
 
     private ApprovedSubmissionExportJobVO toJobVO(ExportJobState job) {
@@ -410,8 +955,8 @@ public class SubmissionExportService {
         }
     }
 
-    private String buildExportPrefix(String exportCode, String enterpriseName) {
-        return exportCode + "_" + enterpriseName;
+    private String buildExportPrefix(String exportCode) {
+        return exportCode;
     }
 
     private String buildZipFileName(ExportJobState job) {
@@ -422,7 +967,7 @@ public class SubmissionExportService {
                 .map(ApprovedSubmissionExportItemResultVO::getExportFolderName)
                 .filter(StringUtils::hasText)
                 .findFirst()
-                .orElse("已审批导出");
+                .orElse("导出结果");
             return sanitizeFileName(folderName + "_" + timestamp) + ".zip";
         }
         return "已审批导出_批量导出_" + timestamp + ".zip";
@@ -500,6 +1045,16 @@ public class SubmissionExportService {
     public static class ExportDownloadFile {
         private Path path;
         private String fileName;
+    }
+
+    @Data
+    @Builder
+    public static class ReportDownloadFile {
+        private Path path;
+        private String fileName;
+    }
+
+    private record ProcessDisplayMeta(Map<String, List<String>> queryMap) {
     }
 
     @Data

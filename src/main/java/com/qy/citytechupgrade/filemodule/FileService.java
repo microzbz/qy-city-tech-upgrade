@@ -64,7 +64,27 @@ public class FileService {
         validateDeviceAttachmentType(file, attachmentType);
         validatePdfOnlyAttachmentType(file, attachmentType);
 
-        submissionService.getById(submissionId, currentUser);
+        SubmissionForm form = submissionFormRepository.findById(submissionId)
+            .orElseThrow(() -> new BizException("填报单不存在"));
+        if (currentUser.getRoles().contains("ENTERPRISE_USER")) {
+            if (!form.getEnterpriseId().equals(currentUser.getEnterpriseId())) {
+                throw new BizException("无权限上传该附件");
+            }
+            SubmissionForm latest = submissionFormRepository.findTopByEnterpriseIdOrderByUpdatedAtDesc(currentUser.getEnterpriseId())
+                .orElseThrow(() -> new BizException("填报单不存在"));
+            if (!latest.getId().equals(form.getId())) {
+                throw new BizException("当前仅允许修改企业最新的一份填报");
+            }
+            if (!submissionService.isEditableStatus(form.getStatus())) {
+                throw new BizException("当前状态不可上传附件");
+            }
+        } else if (currentUser.getRoles().contains("APPROVER_ADMIN") || currentUser.getRoles().contains("SYS_ADMIN")) {
+            if (!submissionService.isApproverEditableStatus(form.getStatus())) {
+                throw new BizException("当前状态不允许管理员上传附件");
+            }
+        } else {
+            throw new BizException("当前用户无权上传附件");
+        }
 
         String ext = getExt(file.getOriginalFilename());
         String relativeDir = buildSubDirByConfig();
@@ -134,14 +154,24 @@ public class FileService {
         SubmissionForm form = submissionFormRepository.findById(attachment.getSubmissionId())
             .orElseThrow(() -> new BizException("填报单不存在"));
 
-        if (!currentUser.getRoles().contains("ENTERPRISE_USER")) {
-            throw new BizException("仅企业填报用户可删除附件");
-        }
-        if (!form.getEnterpriseId().equals(currentUser.getEnterpriseId())) {
-            throw new BizException("无权限删除该附件");
-        }
-        if (!(form.getStatus() == SubmissionStatus.DRAFT || form.getStatus() == SubmissionStatus.RETURNED)) {
-            throw new BizException("当前状态不可删除附件");
+        if (currentUser.getRoles().contains("ENTERPRISE_USER")) {
+            if (!form.getEnterpriseId().equals(currentUser.getEnterpriseId())) {
+                throw new BizException("无权限删除该附件");
+            }
+            SubmissionForm latest = submissionFormRepository.findTopByEnterpriseIdOrderByUpdatedAtDesc(currentUser.getEnterpriseId())
+                .orElseThrow(() -> new BizException("填报单不存在"));
+            if (!latest.getId().equals(form.getId())) {
+                throw new BizException("当前仅允许修改企业最新的一份填报");
+            }
+            if (!submissionService.isEditableStatus(form.getStatus())) {
+                throw new BizException("当前状态不可删除附件");
+            }
+        } else if (currentUser.getRoles().contains("APPROVER_ADMIN") || currentUser.getRoles().contains("SYS_ADMIN")) {
+            if (!submissionService.isApproverEditableStatus(form.getStatus())) {
+                throw new BizException("当前状态不允许管理员删除附件");
+            }
+        } else {
+            throw new BizException("当前用户无权删除附件");
         }
 
         Path filePath = Paths.get(attachment.getFilePath());

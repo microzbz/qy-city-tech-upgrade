@@ -55,7 +55,7 @@ public class SubmissionService {
     public SubmissionDetailVO current(CurrentUser currentUser) {
         Long enterpriseId = requireEnterpriseId(currentUser);
         return submissionFormRepository
-            .findTopByEnterpriseIdAndStatusInOrderByUpdatedAtDesc(enterpriseId, List.of(SubmissionStatus.DRAFT, SubmissionStatus.RETURNED))
+            .findTopByEnterpriseIdOrderByUpdatedAtDesc(enterpriseId)
             .map(form -> detail(form, currentUser))
             .orElseGet(() -> buildInitialDetailFromEnterprise(enterpriseId));
     }
@@ -68,31 +68,60 @@ public class SubmissionService {
         if (req.getSubmissionId() != null) {
             form = submissionFormRepository.findById(req.getSubmissionId()).orElseThrow(() -> new BizException("填报单不存在"));
             assertOwner(form, enterpriseId);
-            if (!(form.getStatus() == SubmissionStatus.DRAFT || form.getStatus() == SubmissionStatus.RETURNED)) {
+            assertLatestSubmission(form, enterpriseId);
+            if (!isEditableStatus(form.getStatus())) {
                 throw new BizException("当前状态不允许编辑");
             }
         } else {
             form = submissionFormRepository
-                .findTopByEnterpriseIdAndStatusInOrderByUpdatedAtDesc(enterpriseId, List.of(SubmissionStatus.DRAFT, SubmissionStatus.RETURNED))
+                .findTopByEnterpriseIdOrderByUpdatedAtDesc(enterpriseId)
                 .orElseGet(() -> createDraftFromEnterprise(enterpriseId, currentUser.getUserId()));
         }
 
-        if (form.getStatus() == SubmissionStatus.RETURNED) {
+        if (form.getStatus() == SubmissionStatus.RETURNED || form.getStatus() == SubmissionStatus.REJECTED) {
             form.setStatus(SubmissionStatus.DRAFT);
+            form.setCurrentNodeSeq(null);
+            form.setCurrentNodeName(null);
+            form.setLastActionAt(LocalDateTime.now());
         }
         if (req.getReportYear() != null) {
             form.setReportYear(req.getReportYear());
         }
         submissionFormRepository.save(form);
 
-        validateRequiredBasicInfo(req.getBasicInfo());
-        validateOtherFields(req.getDeviceInfo(), req.getDigitalInfo(), req.getRdToolInfo());
-        upsertBasicInfo(form.getId(), req.getBasicInfo());
-        upsertDeviceInfo(form.getId(), req.getDeviceInfo());
-        upsertDigitalInfo(form.getId(), req.getDigitalInfo());
-        upsertRdInfo(form.getId(), req.getRdToolInfo());
+        saveSubmissionContent(form, req);
 
-        auditService.log(currentUser.getUserId(), "SUBMISSION", "SAVE_DRAFT", String.valueOf(form.getId()), "保存草稿");
+        auditService.log(
+            currentUser.getUserId(),
+            "SUBMISSION",
+            "SAVE_DRAFT",
+            String.valueOf(form.getId()),
+            "保存草稿，单据号: " + resolveDocumentNo(form)
+        );
+        return detail(form, currentUser);
+    }
+
+    @Transactional
+    public SubmissionDetailVO saveByApprover(Long submissionId, SubmissionSaveRequest req, CurrentUser currentUser) {
+        SubmissionForm form = submissionFormRepository.findById(submissionId).orElseThrow(() -> new BizException("填报单不存在"));
+        if (req.getSubmissionId() != null && !submissionId.equals(req.getSubmissionId())) {
+            throw new BizException("提交单据不匹配");
+        }
+        if (!isApproverEditableStatus(form.getStatus())) {
+            throw new BizException("当前状态不允许管理员编辑");
+        }
+        if (req.getReportYear() != null) {
+            form.setReportYear(req.getReportYear());
+        }
+        submissionFormRepository.save(form);
+        saveSubmissionContent(form, req);
+        auditService.log(
+            currentUser.getUserId(),
+            "SUBMISSION",
+            "ADMIN_SAVE",
+            String.valueOf(form.getId()),
+            "管理员保存修改，单据号: " + resolveDocumentNo(form)
+        );
         return detail(form, currentUser);
     }
 
@@ -101,7 +130,8 @@ public class SubmissionService {
         Long enterpriseId = requireEnterpriseId(currentUser);
         SubmissionForm form = submissionFormRepository.findById(submissionId).orElseThrow(() -> new BizException("填报单不存在"));
         assertOwner(form, enterpriseId);
-        if (!(form.getStatus() == SubmissionStatus.DRAFT || form.getStatus() == SubmissionStatus.RETURNED)) {
+        assertLatestSubmission(form, enterpriseId);
+        if (!isEditableStatus(form.getStatus())) {
             throw new BizException("当前状态不允许提交");
         }
         SubmissionSaveRequest.DeviceInfo deviceInfo = submissionDeviceInfoRepository.findBySubmissionId(form.getId())
@@ -116,10 +146,7 @@ public class SubmissionService {
         SubmissionSaveRequest.BasicInfo basicInfo = submissionBasicInfoRepository.findBySubmissionId(form.getId())
             .map(this::toBasicInfo)
             .orElse(new SubmissionSaveRequest.BasicInfo());
-        validateRequiredBasicInfo(basicInfo);
-        validateRequiredSelections(deviceInfo, digitalInfo, rdToolInfo);
-        validateOtherFields(deviceInfo, digitalInfo, rdToolInfo);
-        validateRequiredAttachments(form.getId());
+        validateSubmissionBeforeSubmit(form.getId(), basicInfo, deviceInfo, digitalInfo, rdToolInfo);
 
         form.setStatus(SubmissionStatus.SUBMITTED);
         form.setSubmittedBy(currentUser.getUserId());
@@ -127,15 +154,21 @@ public class SubmissionService {
         form.setLastActionAt(LocalDateTime.now());
         submissionFormRepository.save(form);
 
-        auditService.log(currentUser.getUserId(), "SUBMISSION", "SUBMIT", String.valueOf(form.getId()), "提交审批");
+        auditService.log(
+            currentUser.getUserId(),
+            "SUBMISSION",
+            "SUBMIT",
+            String.valueOf(form.getId()),
+            "提交审批，单据号: " + resolveDocumentNo(form)
+        );
         return detail(form, currentUser);
     }
 
     public List<SubmissionListItemVO> myList(CurrentUser currentUser) {
         Long enterpriseId = requireEnterpriseId(currentUser);
-        return submissionFormRepository.findByEnterpriseIdOrderByCreatedAtDesc(enterpriseId).stream()
-            .map(this::toListItem)
-            .toList();
+        return submissionFormRepository.findTopByEnterpriseIdOrderByUpdatedAtDesc(enterpriseId)
+            .map(form -> List.of(toListItem(form)))
+            .orElseGet(List::of);
     }
 
     public SubmissionDetailVO getById(Long id, CurrentUser currentUser) {
@@ -152,6 +185,10 @@ public class SubmissionService {
 
     public SubmissionDetailVO getDetailForExport(Long submissionId) {
         return detail(getByIdOrThrow(submissionId), null);
+    }
+
+    public String getDocumentNo(Long submissionId) {
+        return resolveDocumentNo(getByIdOrThrow(submissionId));
     }
 
     @Transactional
@@ -240,11 +277,45 @@ public class SubmissionService {
         submissionAttachmentRepository.save(a);
     }
 
+    public boolean isEditableStatus(SubmissionStatus status) {
+        return status == SubmissionStatus.DRAFT
+            || status == SubmissionStatus.RETURNED
+            || status == SubmissionStatus.REJECTED;
+    }
+
+    public boolean isApproverEditableStatus(SubmissionStatus status) {
+        return status == SubmissionStatus.APPROVED
+            || status == SubmissionStatus.RETURNED
+            || status == SubmissionStatus.REJECTED
+            || status == SubmissionStatus.SUBMITTED
+            || status == SubmissionStatus.UNDER_REVIEW;
+    }
+
+    public void validateSubmissionBeforeApprove(Long submissionId) {
+        SubmissionSaveRequest.DeviceInfo deviceInfo = submissionDeviceInfoRepository.findBySubmissionId(submissionId)
+            .map(this::toDeviceInfo)
+            .orElse(new SubmissionSaveRequest.DeviceInfo());
+        SubmissionSaveRequest.DigitalInfo digitalInfo = submissionDigitalInfoRepository.findBySubmissionId(submissionId)
+            .map(this::toDigitalInfo)
+            .orElse(new SubmissionSaveRequest.DigitalInfo());
+        SubmissionSaveRequest.RdToolInfo rdToolInfo = submissionRdToolInfoRepository.findBySubmissionId(submissionId)
+            .map(this::toRdInfo)
+            .orElse(new SubmissionSaveRequest.RdToolInfo());
+        SubmissionSaveRequest.BasicInfo basicInfo = submissionBasicInfoRepository.findBySubmissionId(submissionId)
+            .map(this::toBasicInfo)
+            .orElse(new SubmissionSaveRequest.BasicInfo());
+        validateSubmissionBeforeSubmit(submissionId, basicInfo, deviceInfo, digitalInfo, rdToolInfo);
+    }
+
     private SubmissionForm createDraftFromEnterprise(Long enterpriseId, Long userId) {
         EnterpriseProfile enterprise = enterpriseService.findByIdOrThrow(enterpriseId);
-        String matchedIndustryCode = enterpriseService.findIndustryCodeByEnterpriseName(enterprise.getEnterpriseName());
-        String industryCode = StringUtils.hasText(matchedIndustryCode) ? matchedIndustryCode : enterprise.getIndustryCode();
-        String industryName = Objects.equals(industryCode, enterprise.getIndustryCode()) ? enterprise.getIndustryName() : null;
+        EnterpriseService.SurveyIndustryInfo surveyIndustryInfo = enterpriseService.findSurveyIndustryInfo(enterprise.getEnterpriseName());
+        String industryCode = surveyIndustryInfo != null && StringUtils.hasText(surveyIndustryInfo.industryCode())
+            ? surveyIndustryInfo.industryCode()
+            : enterprise.getIndustryCode();
+        String industryName = surveyIndustryInfo != null && StringUtils.hasText(surveyIndustryInfo.industryName())
+            ? surveyIndustryInfo.industryName()
+            : enterprise.getIndustryName();
 
         SubmissionForm form = new SubmissionForm();
         form.setEnterpriseId(enterpriseId);
@@ -278,9 +349,13 @@ public class SubmissionService {
 
     private SubmissionDetailVO buildInitialDetailFromEnterprise(Long enterpriseId) {
         EnterpriseProfile enterprise = enterpriseService.findByIdOrThrow(enterpriseId);
-        String matchedIndustryCode = enterpriseService.findIndustryCodeByEnterpriseName(enterprise.getEnterpriseName());
-        String industryCode = StringUtils.hasText(matchedIndustryCode) ? matchedIndustryCode : enterprise.getIndustryCode();
-        String industryName = Objects.equals(industryCode, enterprise.getIndustryCode()) ? enterprise.getIndustryName() : null;
+        EnterpriseService.SurveyIndustryInfo surveyIndustryInfo = enterpriseService.findSurveyIndustryInfo(enterprise.getEnterpriseName());
+        String industryCode = surveyIndustryInfo != null && StringUtils.hasText(surveyIndustryInfo.industryCode())
+            ? surveyIndustryInfo.industryCode()
+            : enterprise.getIndustryCode();
+        String industryName = surveyIndustryInfo != null && StringUtils.hasText(surveyIndustryInfo.industryName())
+            ? surveyIndustryInfo.industryName()
+            : enterprise.getIndustryName();
         SubmissionSaveRequest.BasicInfo basic = new SubmissionSaveRequest.BasicInfo();
         basic.setEnterpriseName(enterprise.getEnterpriseName());
         basic.setCreditCode(enterprise.getCreditCode());
@@ -557,6 +632,34 @@ public class SubmissionService {
         if (!form.getEnterpriseId().equals(enterpriseId)) {
             throw new BizException("无权访问该填报单");
         }
+    }
+
+    private void assertLatestSubmission(SubmissionForm form, Long enterpriseId) {
+        SubmissionForm latest = submissionFormRepository.findTopByEnterpriseIdOrderByUpdatedAtDesc(enterpriseId)
+            .orElseThrow(() -> new BizException("填报单不存在"));
+        if (!latest.getId().equals(form.getId())) {
+            throw new BizException("当前仅允许修改企业最新的一份填报");
+        }
+    }
+
+    private void saveSubmissionContent(SubmissionForm form, SubmissionSaveRequest req) {
+        validateRequiredBasicInfo(req.getBasicInfo());
+        validateOtherFields(req.getDeviceInfo(), req.getDigitalInfo(), req.getRdToolInfo());
+        upsertBasicInfo(form.getId(), req.getBasicInfo());
+        upsertDeviceInfo(form.getId(), req.getDeviceInfo());
+        upsertDigitalInfo(form.getId(), req.getDigitalInfo());
+        upsertRdInfo(form.getId(), req.getRdToolInfo());
+    }
+
+    private void validateSubmissionBeforeSubmit(Long submissionId,
+                                                SubmissionSaveRequest.BasicInfo basicInfo,
+                                                SubmissionSaveRequest.DeviceInfo deviceInfo,
+                                                SubmissionSaveRequest.DigitalInfo digitalInfo,
+                                                SubmissionSaveRequest.RdToolInfo rdToolInfo) {
+        validateRequiredBasicInfo(basicInfo);
+        validateRequiredSelections(deviceInfo, digitalInfo, rdToolInfo);
+        validateOtherFields(deviceInfo, digitalInfo, rdToolInfo);
+        validateRequiredAttachments(submissionId);
     }
 
     private void validateOtherFields(SubmissionSaveRequest.DeviceInfo device,

@@ -15,8 +15,16 @@
           {{ reviewReason(row) }}
         </template>
       </el-table-column>
-      <el-table-column prop="submittedAt" label="提交时间" width="180"/>
-      <el-table-column prop="updatedAt" label="更新时间" width="180"/>
+      <el-table-column label="提交时间" width="180">
+        <template #default="{ row }">
+          {{ formatDateTime(row.submittedAt) }}
+        </template>
+      </el-table-column>
+      <el-table-column label="更新时间" width="180">
+        <template #default="{ row }">
+          {{ formatDateTime(row.updatedAt) }}
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="120">
         <template #default="scope">
           <el-button type="primary" link @click="open(scope.row.submissionId)">查看</el-button>
@@ -30,6 +38,7 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import http from '../api/http'
+import { formatDateTime } from '../utils/datetime'
 
 const rows = ref([])
 const router = useRouter()

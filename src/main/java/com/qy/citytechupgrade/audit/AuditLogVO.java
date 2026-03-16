@@ -11,6 +11,8 @@ public class AuditLogVO {
     private Long id;
     private Long userId;
     private String userDisplayName;
+    private String documentNo;
+    private String enterpriseName;
     private String moduleName;
     private String actionName;
     private String businessId;

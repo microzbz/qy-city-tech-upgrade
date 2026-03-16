@@ -9,6 +9,7 @@ import com.qy.citytechupgrade.common.exception.BizException;
 import com.qy.citytechupgrade.common.security.CurrentUser;
 import com.qy.citytechupgrade.enterprise.EnterpriseProfile;
 import com.qy.citytechupgrade.enterprise.EnterpriseProfileRepository;
+import com.qy.citytechupgrade.enterprise.EnterpriseService;
 import com.qy.citytechupgrade.enterprise.QfClientService;
 import com.qy.citytechupgrade.user.SysUser;
 import com.qy.citytechupgrade.user.UserService;
@@ -37,6 +38,7 @@ public class AuthService {
     private final AuditService auditService;
     private final QfClientService qfClientService;
     private final EnterpriseProfileRepository enterpriseProfileRepository;
+    private final EnterpriseService enterpriseService;
     private final ObjectMapper objectMapper;
 
     public LoginResponse login(LoginRequest request) {
@@ -119,32 +121,37 @@ public class AuthService {
         log.info("[SSO] resolve externalId={}, usertype={}", externalId, readString(userInfo, "usertype"));
 
         String username = resolveSsoUsername(userInfo, externalId);
-        String displayName = firstNonBlank(readString(userInfo, "cn"), readString(userInfo, "linkPersonName"), username);
-        EnterpriseProfile enterprise = upsertEnterprise(userInfo, externalId);
-
-        SysUser user = userService.findByUsername(username).orElseGet(SysUser::new);
-        boolean isNew = user.getId() == null;
-        if (isNew) {
-            user.setUsername(username);
-            user.setPasswordHash(generateDefaultPasswordHash());
-            user.setStatus(UserStatus.ACTIVE);
+        SysUser existingUser = userService.findByUsername(username).orElse(null);
+        if (existingUser != null) {
+            log.info("[SSO] existing user found, skip profile sync, userId={}, username={}, enterpriseId={}",
+                existingUser.getId(), existingUser.getUsername(), existingUser.getEnterpriseId());
+            return existingUser;
         }
+
+        String displayName = firstNonBlank(readString(userInfo, "cn"), readString(userInfo, "linkPersonName"), username);
+        EnterpriseProfile enterprise = createSsoEnterprise(userInfo, externalId);
+
+        SysUser user = new SysUser();
+        boolean isNew = true;
+        user.setUsername(username);
+        user.setPasswordHash(generateDefaultPasswordHash());
+        user.setStatus(UserStatus.ACTIVE);
         user.setDisplayName(limit(displayName, 128));
         user.setEnterpriseId(enterprise == null ? null : enterprise.getId());
-        if (!StringUtils.hasText(user.getPasswordHash())) {
-            user.setPasswordHash(generateDefaultPasswordHash());
-        }
-        if (user.getStatus() == null) {
-            user.setStatus(UserStatus.ACTIVE);
-        }
         log.info("[SSO] preparing user save, username={}, displayName={}, enterpriseId={}, isNew={}",
             username, displayName, enterprise == null ? null : enterprise.getId(), isNew);
         return userService.save(user);
     }
 
-    private EnterpriseProfile upsertEnterprise(Map<String, Object> userInfo, String externalId) {
+    private EnterpriseProfile createSsoEnterprise(Map<String, Object> userInfo, String externalId) {
         Map<String, Object> enterpriseInfo = resolveEnterpriseInfo(userInfo);
         String creditCode = resolveCreditCode(enterpriseInfo, userInfo, externalId);
+        EnterpriseProfile existingEnterprise = enterpriseProfileRepository.findByCreditCode(creditCode).orElse(null);
+        if (existingEnterprise != null) {
+            log.info("[SSO] existing enterprise found, skip profile sync, id={}, creditCode={}, enterpriseName={}",
+                existingEnterprise.getId(), existingEnterprise.getCreditCode(), existingEnterprise.getEnterpriseName());
+            return existingEnterprise;
+        }
         String enterpriseName = firstNonBlank(
             readString(enterpriseInfo, "cn"),
             readString(enterpriseInfo, "enterpriseName"),
@@ -156,14 +163,22 @@ public class AuthService {
         );
         log.info("[SSO] enterprise upsert start, creditCode={}, enterpriseName={}", creditCode, enterpriseName);
 
-        EnterpriseProfile enterprise = enterpriseProfileRepository.findByCreditCode(creditCode).orElseGet(EnterpriseProfile::new);
-        if (enterprise.getId() == null) {
-            enterprise.setCreditCode(creditCode);
-        }
-        if (!StringUtils.hasText(enterprise.getCreditCode())) {
-            enterprise.setCreditCode(creditCode);
-        }
+        EnterpriseProfile enterprise = new EnterpriseProfile();
+        enterprise.setCreditCode(creditCode);
         enterprise.setEnterpriseName(limit(enterpriseName, 255));
+        EnterpriseService.SurveyIndustryInfo surveyIndustryInfo = enterpriseService.findSurveyIndustryInfo(enterpriseName);
+        if (surveyIndustryInfo != null) {
+            if (StringUtils.hasText(surveyIndustryInfo.industryCode())) {
+                enterprise.setIndustryCode(limit(surveyIndustryInfo.industryCode(), 10));
+            }
+            if (StringUtils.hasText(surveyIndustryInfo.industryName())) {
+                enterprise.setIndustryName(limit(surveyIndustryInfo.industryName(), 255));
+            }
+            log.info("[SSO] survey enterprise industry matched, enterpriseName={}, industryCode={}, industryName={}",
+                enterpriseName, surveyIndustryInfo.industryCode(), surveyIndustryInfo.industryName());
+        } else {
+            log.info("[SSO] survey enterprise industry not found, enterpriseName={}", enterpriseName);
+        }
         String legalPerson = firstNonBlank(readString(enterpriseInfo, "legalPerson"), readString(userInfo, "legalPerson"));
         if (StringUtils.hasText(legalPerson)) {
             enterprise.setLegalPerson(limit(legalPerson, 128));

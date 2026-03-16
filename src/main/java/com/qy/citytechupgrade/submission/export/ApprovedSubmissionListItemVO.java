@@ -12,8 +12,12 @@ public class ApprovedSubmissionListItemVO {
     private String documentNo;
     private Integer reportYear;
     private String enterpriseName;
+    private String status;
+    private String statusLabel;
+    private String reviewActionLabel;
+    private String reviewComment;
     private boolean exportable;
     private String exportHint;
     private LocalDateTime submittedAt;
-    private LocalDateTime approvedAt;
+    private LocalDateTime reviewHandledAt;
 }

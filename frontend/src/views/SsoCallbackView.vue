@@ -43,6 +43,29 @@ onMounted(async () => {
     hash: window.location.hash,
     search: window.location.search
   })
+  if (auth.isLogin) {
+    try {
+      if (!auth.userInfo) {
+        console.info('[SSO][FE] existing token detected, validating current session')
+        await auth.fetchMe()
+      }
+      if (auth.userInfo) {
+        const target = resolveLoginTarget()
+        console.info('[SSO][FE] already logged in, skipping sso', {
+          userId: auth.userInfo?.userId,
+          username: auth.userInfo?.username,
+          roles: auth.roles,
+          target
+        })
+        router.replace(target)
+        return
+      }
+    } catch (err) {
+      console.warn('[SSO][FE] existing session validation failed, continue sso', {
+        message: err?.response?.data?.message || err?.message
+      })
+    }
+  }
   const ecspcode = readEcspCode()
   console.info('[SSO][FE] ecspcode extracted', {
     exists: !!ecspcode,

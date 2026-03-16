@@ -1,6 +1,8 @@
 package com.qy.citytechupgrade.enterprise;
 
 import com.qy.citytechupgrade.common.exception.BizException;
+import com.qy.citytechupgrade.industry.IndustryProcessMap;
+import com.qy.citytechupgrade.industry.IndustryProcessMapRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -15,6 +17,7 @@ public class EnterpriseService {
     private final EnterpriseProfileRepository enterpriseProfileRepository;
     private final QfClientService qfClientService;
     private final JdbcTemplate jdbcTemplate;
+    private final IndustryProcessMapRepository industryProcessMapRepository;
 
     public EnterpriseProfileVO getByCreditCode(String creditCode) {
         EnterpriseProfile profile = enterpriseProfileRepository.findByCreditCode(creditCode).orElse(null);
@@ -89,6 +92,46 @@ public class EnterpriseService {
         }
     }
 
+    public SurveyIndustryInfo findSurveyIndustryInfo(String enterpriseName) {
+        SurveyEnterpriseCodeInfo codeInfo = findSurveyEnterpriseCodeInfo(enterpriseName);
+        if (codeInfo == null || !StringUtils.hasText(codeInfo.industryCode())) {
+            return null;
+        }
+        String industryCode = codeInfo.industryCode().trim();
+        String industryName = findIndustryNameByIndustryCode(industryCode);
+        return new SurveyIndustryInfo(industryCode, industryName);
+    }
+
+    public String findIndustryNameByIndustryCode(String industryCode) {
+        String code = industryCode == null ? null : industryCode.trim();
+        if (!StringUtils.hasText(code)) {
+            return null;
+        }
+        if (code.length() >= 3) {
+            String threeDigits = code.substring(0, 3);
+            String matched = findIndustryNameByExactCode(threeDigits);
+            if (StringUtils.hasText(matched)) {
+                return matched;
+            }
+        }
+        if (code.length() >= 2) {
+            String twoDigits = code.substring(0, 2);
+            String matched = findIndustryNameByExactCode(twoDigits);
+            if (StringUtils.hasText(matched)) {
+                return matched;
+            }
+        }
+        return findIndustryNameByExactCode(code);
+    }
+
+    private String findIndustryNameByExactCode(String industryCode) {
+        return industryProcessMapRepository.findByIndustryCode(industryCode)
+            .map(IndustryProcessMap::getIndustryName)
+            .map(String::trim)
+            .filter(StringUtils::hasText)
+            .orElse(null);
+    }
+
     public record SurveyEnterpriseCodeInfo(
         String enterpriseName,
         String industryCode,
@@ -104,5 +147,11 @@ public class EnterpriseService {
         private static String safe(String value) {
             return value == null ? "" : value.trim();
         }
+    }
+
+    public record SurveyIndustryInfo(
+        String industryCode,
+        String industryName
+    ) {
     }
 }

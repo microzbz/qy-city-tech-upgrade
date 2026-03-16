@@ -2,6 +2,7 @@ package com.qy.citytechupgrade.user;
 
 import com.qy.citytechupgrade.audit.AuditService;
 import com.qy.citytechupgrade.common.dto.ApiResponse;
+import com.qy.citytechupgrade.common.dto.PagedResult;
 import com.qy.citytechupgrade.common.security.SecurityUtils;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -19,8 +20,9 @@ public class UserController {
 
     @GetMapping("/users")
     @PreAuthorize("hasAnyRole('SYS_ADMIN','APPROVER_ADMIN')")
-    public ApiResponse<List<UserVO>> listUsers() {
-        return ApiResponse.success(userService.listUsers());
+    public ApiResponse<PagedResult<UserVO>> listUsers(@RequestParam(defaultValue = "1") Integer page,
+                                                      @RequestParam(defaultValue = "20") Integer size) {
+        return ApiResponse.success(userService.listUsers(page, size));
     }
 
     @PostMapping("/users")

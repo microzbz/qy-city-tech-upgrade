@@ -17,6 +17,7 @@ const routes = [
       { path: '/admin/workflow', component: () => import('../views/WorkflowTemplateView.vue'), meta: { roles: ['SYS_ADMIN'] } },
       { path: '/admin/users', component: () => import('../views/UserManagementView.vue'), meta: { roles: ['APPROVER_ADMIN', 'SYS_ADMIN'] } },
       { path: '/admin/industry-mappings', component: () => import('../views/IndustryMappingAdminView.vue'), meta: { roles: ['SYS_ADMIN'] } },
+      { path: '/admin/survey-enterprises', component: () => import('../views/SurveyEnterpriseAdminView.vue'), meta: { roles: ['SYS_ADMIN'] } },
       { path: '/admin/submission-options', component: () => import('../views/SubmissionOptionAdminView.vue'), meta: { roles: ['SYS_ADMIN'] } },
       { path: '/admin/audit-logs', component: () => import('../views/AuditLogView.vue'), meta: { roles: ['APPROVER_ADMIN', 'SYS_ADMIN'] } },
       { path: '/common/notices', component: () => import('../views/NoticeView.vue') }

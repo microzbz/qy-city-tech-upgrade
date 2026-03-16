@@ -15,6 +15,17 @@
         <template #default="scope"><el-button type="primary" link @click="openEdit(scope.row)">编辑</el-button></template>
       </el-table-column>
     </el-table>
+    <div class="table-pager">
+      <el-pagination
+        v-model:current-page="pager.page"
+        v-model:page-size="pager.size"
+        :total="pager.total"
+        :page-sizes="pageSizeOptions"
+        layout="total, sizes, prev, pager, next, jumper"
+        @size-change="onSizeChange"
+        @current-change="onPageChange"
+      />
+    </div>
 
     <el-dialog v-model="showDialog" title="用户信息" width="520px">
       <el-form :model="form" label-width="100px">
@@ -45,11 +56,17 @@ import http from '../api/http'
 
 const rows = ref([])
 const showDialog = ref(false)
+const pageSizeOptions = [10, 20, 50, 100]
+const pager = reactive({ page: 1, size: 20, total: 0 })
 const form = reactive({ id: null, username: '', displayName: '', password: '', status: 'ACTIVE', enterpriseId: '', roleCodes: [] })
 
 const load = async () => {
-  const res = await http.get('/users')
-  rows.value = res.data || []
+  const res = await http.get('/users', { params: { page: pager.page, size: pager.size } })
+  const data = res.data || {}
+  rows.value = data.records || []
+  pager.total = data.total || 0
+  pager.page = data.page || pager.page
+  pager.size = data.size || pager.size
 }
 
 const reset = () => {
@@ -100,6 +117,17 @@ const save = async () => {
   ElMessage.success('保存成功')
   showDialog.value = false
   await load()
+}
+
+const onPageChange = (page) => {
+  pager.page = page
+  load()
+}
+
+const onSizeChange = (size) => {
+  pager.page = 1
+  pager.size = size
+  load()
 }
 
 onMounted(load)

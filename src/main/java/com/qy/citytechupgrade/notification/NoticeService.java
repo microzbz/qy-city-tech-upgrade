@@ -1,7 +1,11 @@
 package com.qy.citytechupgrade.notification;
 
+import com.qy.citytechupgrade.common.dto.PagedResult;
 import com.qy.citytechupgrade.common.exception.BizException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -20,8 +24,12 @@ public class NoticeService {
         sysNoticeRepository.save(n);
     }
 
-    public List<SysNotice> myNotices(Long userId) {
-        return sysNoticeRepository.findByUserIdOrderByCreatedAtDesc(userId);
+    public PagedResult<SysNotice> myNotices(Long userId, Integer page, Integer size) {
+        int safePage = page == null || page < 1 ? 1 : page;
+        int safeSize = size == null || size < 1 ? 20 : Math.min(size, 100);
+        Pageable pageable = PageRequest.of(safePage - 1, safeSize);
+        Page<SysNotice> result = sysNoticeRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable);
+        return PagedResult.of(result.getContent(), result.getTotalElements(), result.getNumber() + 1, result.getSize());
     }
 
     public void markRead(Long noticeId, Long userId) {

@@ -1,11 +1,10 @@
 package com.qy.citytechupgrade.notification;
 
 import com.qy.citytechupgrade.common.dto.ApiResponse;
+import com.qy.citytechupgrade.common.dto.PagedResult;
 import com.qy.citytechupgrade.common.security.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 @RestController
 @RequestMapping("/api/notices")
@@ -14,8 +13,9 @@ public class NoticeController {
     private final NoticeService noticeService;
 
     @GetMapping("/my")
-    public ApiResponse<List<SysNotice>> my() {
-        return ApiResponse.success(noticeService.myNotices(SecurityUtils.currentUserId()));
+    public ApiResponse<PagedResult<SysNotice>> my(@RequestParam(defaultValue = "1") Integer page,
+                                                  @RequestParam(defaultValue = "20") Integer size) {
+        return ApiResponse.success(noticeService.myNotices(SecurityUtils.currentUserId(), page, size));
     }
 
     @PostMapping("/{id}/read")

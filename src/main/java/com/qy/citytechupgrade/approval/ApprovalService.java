@@ -1,6 +1,7 @@
 package com.qy.citytechupgrade.approval;
 
 import com.qy.citytechupgrade.audit.AuditService;
+import com.qy.citytechupgrade.common.dto.PagedResult;
 import com.qy.citytechupgrade.common.enums.SubmissionStatus;
 import com.qy.citytechupgrade.common.enums.TaskAction;
 import com.qy.citytechupgrade.common.enums.TaskStatus;
@@ -11,8 +12,10 @@ import com.qy.citytechupgrade.common.util.SubmissionNoUtils;
 import com.qy.citytechupgrade.notification.NoticeService;
 import com.qy.citytechupgrade.submission.SubmissionBasicInfo;
 import com.qy.citytechupgrade.submission.SubmissionBasicInfoRepository;
+import com.qy.citytechupgrade.submission.SubmissionDetailVO;
 import com.qy.citytechupgrade.submission.SubmissionForm;
 import com.qy.citytechupgrade.submission.SubmissionFormRepository;
+import com.qy.citytechupgrade.submission.SubmissionSaveRequest;
 import com.qy.citytechupgrade.submission.SubmissionService;
 import com.qy.citytechupgrade.user.SysUser;
 import com.qy.citytechupgrade.user.UserService;
@@ -23,8 +26,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 
 @Service
 @RequiredArgsConstructor
@@ -49,7 +54,8 @@ public class ApprovalService {
         if (!workflowService.isApprovalEnabled(WorkflowService.BIZ_TYPE_SUBMISSION)) {
             submissionService.updateReviewNode(submissionId, SubmissionStatus.APPROVED, null, null);
             notifyEnterpriseUsers(submissionId, "审批结果通知", "单据号 " + documentNo + " 已自动通过");
-            auditService.log(operator.getUserId(), "WORKFLOW", "AUTO_APPROVE", String.valueOf(submissionId), "审批开关关闭，自动通过");
+            auditService.log(operator.getUserId(), "WORKFLOW", "AUTO_APPROVE", String.valueOf(submissionId),
+                "审批开关关闭，自动通过，单据号: " + documentNo);
             return;
         }
 
@@ -65,7 +71,9 @@ public class ApprovalService {
                 }
                 List<WfTask> oldTasks = wfTaskRepository.findByInstanceIdOrderByNodeSeqAsc(instance.getId());
                 wfTaskRepository.deleteAll(oldTasks);
+                wfTaskRepository.flush();
                 wfInstanceRepository.delete(instance);
+                wfInstanceRepository.flush();
             });
 
         WfInstance instance = new WfInstance();
@@ -87,17 +95,38 @@ public class ApprovalService {
         submissionService.updateReviewNode(submissionId, SubmissionStatus.SUBMITTED, firstNode.getNodeSeq(), firstNode.getNodeName());
         notifyApprovers(firstNode.getRoleCode(), "您有新的待审批单据", "单据号 " + documentNo + " 已进入审批");
 
-        auditService.log(operator.getUserId(), "WORKFLOW", "START", String.valueOf(submissionId), "发起审批流程");
+        auditService.log(operator.getUserId(), "WORKFLOW", "START", String.valueOf(submissionId), "发起审批流程，单据号: " + documentNo);
     }
 
-    public List<ApprovalTaskVO> todo(CurrentUser currentUser) {
+    public PagedResult<ApprovalTaskVO> todo(
+        String documentNo,
+        String enterpriseName,
+        LocalDateTime startTime,
+        LocalDateTime endTime,
+        Integer page,
+        Integer size,
+        CurrentUser currentUser
+    ) {
         List<WfTask> tasks;
         if (currentUser.getRoles().contains("SYS_ADMIN")) {
             tasks = wfTaskRepository.findByStatusOrderByUpdatedAtDesc(TaskStatus.TODO);
         } else {
             tasks = wfTaskRepository.findByStatusAndRoleCodeInOrderByCreatedAtDesc(TaskStatus.TODO, currentUser.getRoles().stream().toList());
         }
-        return tasks.stream().map(this::toTaskVO).toList();
+        if (startTime != null && endTime != null && startTime.isAfter(endTime)) {
+            throw new BizException("开始时间不能晚于结束时间");
+        }
+        String normalizedDocumentNo = normalizeKeyword(documentNo);
+        String normalizedEnterpriseName = normalizeKeyword(enterpriseName);
+        List<ApprovalTaskVO> filtered = tasks.stream()
+            .map(this::toTaskVO)
+            .filter(task -> matchesTodoFilters(task, normalizedDocumentNo, normalizedEnterpriseName, startTime, endTime))
+            .toList();
+        int safePage = page == null || page < 1 ? 1 : page;
+        int safeSize = size == null || size < 1 ? 20 : Math.min(size, 100);
+        int fromIndex = Math.min((safePage - 1) * safeSize, filtered.size());
+        int toIndex = Math.min(fromIndex + safeSize, filtered.size());
+        return PagedResult.of(filtered.subList(fromIndex, toIndex), filtered.size(), safePage, safeSize);
     }
 
     public List<ApprovalTaskVO> done(CurrentUser currentUser) {
@@ -131,6 +160,56 @@ public class ApprovalService {
     @Transactional
     public void returnBack(Long taskId, String comment, CurrentUser operator) {
         handle(taskId, TaskAction.RETURN, comment, operator);
+    }
+
+    @Transactional
+    public SubmissionDetailVO saveEditedSubmission(Long submissionId, SubmissionSaveRequest request, CurrentUser operator) {
+        return submissionService.saveByApprover(submissionId, request, operator);
+    }
+
+    @Transactional
+    public SubmissionDetailVO submitEditedSubmission(Long submissionId, CurrentUser operator) {
+        SubmissionForm form = submissionService.getByIdOrThrow(submissionId);
+        if (!submissionService.isApproverEditableStatus(form.getStatus())) {
+            throw new BizException("当前状态不允许管理员提交修改");
+        }
+        submissionService.validateSubmissionBeforeApprove(submissionId);
+
+        LocalDateTime now = LocalDateTime.now();
+        wfInstanceRepository.findByBusinessTypeAndBusinessId(WorkflowService.BIZ_TYPE_SUBMISSION, submissionId)
+            .ifPresent(instance -> finalizeInstanceAfterAdminEdit(instance, operator, now));
+
+        submissionService.updateReviewNode(submissionId, SubmissionStatus.APPROVED, null, null);
+        SubmissionForm refreshed = submissionService.getByIdOrThrow(submissionId);
+        String documentNo = resolveDocumentNo(refreshed, submissionId);
+        notifyEnterpriseUsers(submissionId, "审批结果通知", "单据号 " + documentNo + " 已由管理员修改后确认通过");
+        auditService.log(operator.getUserId(), "APPROVAL", "ADMIN_EDIT_APPROVE", String.valueOf(submissionId),
+            "管理员修改后提交并确认通过，单据号: " + documentNo);
+        return submissionService.detail(refreshed, operator);
+    }
+
+    @Transactional
+    public SubmissionDetailVO returnApprovedSubmission(Long submissionId, String comment, CurrentUser operator) {
+        SubmissionForm form = submissionService.getByIdOrThrow(submissionId);
+        if (form.getStatus() != SubmissionStatus.APPROVED) {
+            throw new BizException("仅已审批通过的填报支持退回企业");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        wfInstanceRepository.findByBusinessTypeAndBusinessId(WorkflowService.BIZ_TYPE_SUBMISSION, submissionId)
+            .ifPresent(instance -> appendSyntheticTask(instance, TaskAction.RETURN, comment, operator, now, "管理员退回"));
+
+        submissionService.updateReviewNode(submissionId, SubmissionStatus.RETURNED, null, null);
+        SubmissionForm refreshed = submissionService.getByIdOrThrow(submissionId);
+        String documentNo = resolveDocumentNo(refreshed, submissionId);
+        notifyEnterpriseUsers(
+            submissionId,
+            "审批结果通知",
+            "单据号 " + documentNo + " 已被管理员退回修改" + (StringUtils.hasText(comment) ? "，原因: " + comment : "")
+        );
+        auditService.log(operator.getUserId(), "APPROVAL", "ADMIN_RETURN_APPROVED", String.valueOf(submissionId),
+            buildAuditDetail(documentNo, "管理员退回企业", comment));
+        return submissionService.detail(refreshed, operator);
     }
 
     private void handle(Long taskId, TaskAction action, String comment, CurrentUser operator) {
@@ -193,7 +272,8 @@ public class ApprovalService {
         notifyApprovers(next.getRoleCode(), "您有新的待审批单据", "单据号 " + documentNo + " 已流转到下一节点");
         notifyEnterpriseUsers(submissionId, "审批进度更新", "单据号 " + documentNo + " 正在审核中，当前节点: " + next.getNodeName());
 
-        auditService.log(operator.getUserId(), "APPROVAL", "APPROVE", String.valueOf(submissionId), "节点通过");
+        auditService.log(operator.getUserId(), "APPROVAL", "APPROVE", String.valueOf(submissionId),
+            "节点通过，单据号: " + documentNo);
     }
 
     private void onFinish(WfInstance instance,
@@ -212,7 +292,79 @@ public class ApprovalService {
         String documentNo = resolveDocumentNo(form, submissionId);
         notifyEnterpriseUsers(submissionId, "审批结果通知",
             "单据号 " + documentNo + " 处理结果: " + actionName + (comment == null || comment.isBlank() ? "" : "，意见: " + comment));
-        auditService.log(operator.getUserId(), "APPROVAL", actionName, String.valueOf(submissionId), comment);
+        auditService.log(operator.getUserId(), "APPROVAL", actionName, String.valueOf(submissionId),
+            buildAuditDetail(documentNo, actionName, comment));
+    }
+
+    private String buildAuditDetail(String documentNo, String actionName, String comment) {
+        StringBuilder detail = new StringBuilder(actionName).append("，单据号: ").append(documentNo);
+        if (StringUtils.hasText(comment)) {
+            detail.append("，意见: ").append(comment.trim());
+        }
+        return detail.toString();
+    }
+
+    private void finalizeInstanceAfterAdminEdit(WfInstance instance, CurrentUser operator, LocalDateTime handledAt) {
+        List<WfTask> tasks = wfTaskRepository.findByInstanceIdOrderByNodeSeqAsc(instance.getId());
+        List<WfTask> todoTasks = tasks.stream()
+            .filter(task -> task.getStatus() == TaskStatus.TODO)
+            .toList();
+        if (todoTasks.isEmpty()) {
+            appendSyntheticTask(instance, TaskAction.APPROVE, null, operator, handledAt, "管理员修改确认");
+        } else {
+            for (WfTask task : todoTasks) {
+                task.setStatus(TaskStatus.DONE);
+                task.setAction(TaskAction.APPROVE);
+                task.setCommentText(null);
+                task.setAssigneeUserId(operator.getUserId());
+                task.setHandledAt(handledAt);
+                wfTaskRepository.save(task);
+            }
+        }
+        instance.setStatus(WorkflowStatus.FINISHED);
+        instance.setCurrentNodeSeq(null);
+        instance.setFinishedAt(handledAt);
+        wfInstanceRepository.save(instance);
+    }
+
+    private void appendSyntheticTask(WfInstance instance,
+                                     TaskAction action,
+                                     String comment,
+                                     CurrentUser operator,
+                                     LocalDateTime handledAt,
+                                     String nodeName) {
+        int nextSeq = wfTaskRepository.findByInstanceIdOrderByNodeSeqAsc(instance.getId()).stream()
+            .map(WfTask::getNodeSeq)
+            .filter(seq -> seq != null)
+            .max(Integer::compareTo)
+            .orElse(0) + 1;
+
+        WfTask syntheticTask = new WfTask();
+        syntheticTask.setInstanceId(instance.getId());
+        syntheticTask.setNodeSeq(nextSeq);
+        syntheticTask.setNodeName(nodeName);
+        syntheticTask.setRoleCode(resolveOperatorRole(operator));
+        syntheticTask.setStatus(TaskStatus.DONE);
+        syntheticTask.setAssigneeUserId(operator.getUserId());
+        syntheticTask.setAction(action);
+        syntheticTask.setCommentText(comment);
+        syntheticTask.setHandledAt(handledAt);
+        wfTaskRepository.save(syntheticTask);
+
+        instance.setStatus(WorkflowStatus.FINISHED);
+        instance.setCurrentNodeSeq(null);
+        instance.setFinishedAt(handledAt);
+        wfInstanceRepository.save(instance);
+    }
+
+    private String resolveOperatorRole(CurrentUser operator) {
+        if (operator.getRoles().contains("SYS_ADMIN")) {
+            return "SYS_ADMIN";
+        }
+        if (operator.getRoles().contains("APPROVER_ADMIN")) {
+            return "APPROVER_ADMIN";
+        }
+        return operator.getRoles().stream().findFirst().orElse("APPROVER_ADMIN");
     }
 
     private void notifyApprovers(String roleCode, String title, String content) {
@@ -253,9 +405,43 @@ public class ApprovalService {
             .taskStatus(task.getStatus().name())
             .action(task.getAction() == null ? null : task.getAction().name())
             .comment(task.getCommentText())
+            .submittedAt(form == null ? null : form.getSubmittedAt())
             .createdAt(task.getCreatedAt())
             .handledAt(task.getHandledAt())
             .build();
+    }
+
+    private boolean matchesTodoFilters(
+        ApprovalTaskVO task,
+        String normalizedDocumentNo,
+        String normalizedEnterpriseName,
+        LocalDateTime startTime,
+        LocalDateTime endTime
+    ) {
+        if (StringUtils.hasText(normalizedDocumentNo)) {
+            String doc = task.getDocumentNo() == null ? "" : task.getDocumentNo().trim().toLowerCase(Locale.ROOT);
+            if (!doc.contains(normalizedDocumentNo)) {
+                return false;
+            }
+        }
+        if (StringUtils.hasText(normalizedEnterpriseName)) {
+            String name = task.getEnterpriseName() == null ? "" : task.getEnterpriseName().trim().toLowerCase(Locale.ROOT);
+            if (!name.contains(normalizedEnterpriseName)) {
+                return false;
+            }
+        }
+        LocalDateTime submittedAt = task.getSubmittedAt();
+        if (startTime != null && (submittedAt == null || submittedAt.isBefore(startTime))) {
+            return false;
+        }
+        if (endTime != null && (submittedAt == null || submittedAt.isAfter(endTime))) {
+            return false;
+        }
+        return true;
+    }
+
+    private String normalizeKeyword(String value) {
+        return StringUtils.hasText(value) ? value.trim().toLowerCase(Locale.ROOT) : null;
     }
 
     private String resolveDocumentNo(SubmissionForm form, Long submissionId) {
