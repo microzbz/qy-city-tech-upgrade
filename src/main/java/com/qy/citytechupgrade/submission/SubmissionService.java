@@ -19,6 +19,7 @@ import com.qy.citytechupgrade.workflow.WfTemplateNodeRepository;
 import com.qy.citytechupgrade.workflow.WorkflowService;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -30,6 +31,7 @@ import java.util.List;
 import java.util.Objects;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class SubmissionService {
     private static final String OTHER_OPTION = "其他";
@@ -63,6 +65,8 @@ public class SubmissionService {
     @Transactional
     public SubmissionDetailVO saveDraft(SubmissionSaveRequest req, CurrentUser currentUser) {
         Long enterpriseId = requireEnterpriseId(currentUser);
+        log.info("[填报] 开始保存草稿，userId={}，enterpriseId={}，submissionId={}，reportYear={}",
+            currentUser.getUserId(), enterpriseId, req.getSubmissionId(), req.getReportYear());
         SubmissionForm form;
 
         if (req.getSubmissionId() != null) {
@@ -90,6 +94,7 @@ public class SubmissionService {
         submissionFormRepository.save(form);
 
         saveSubmissionContent(form, req);
+        touchUpdatedAt(form);
 
         auditService.log(
             currentUser.getUserId(),
@@ -98,11 +103,15 @@ public class SubmissionService {
             String.valueOf(form.getId()),
             "保存草稿，单据号: " + resolveDocumentNo(form)
         );
+        log.info("[填报] 草稿保存成功，userId={}，enterpriseId={}，submissionId={}，documentNo={}，status={}，updatedAt={}",
+            currentUser.getUserId(), enterpriseId, form.getId(), resolveDocumentNo(form), form.getStatus(), form.getUpdatedAt());
         return detail(form, currentUser);
     }
 
     @Transactional
     public SubmissionDetailVO saveByApprover(Long submissionId, SubmissionSaveRequest req, CurrentUser currentUser) {
+        log.info("[填报] 管理员开始保存修改，operatorId={}，submissionId={}，requestSubmissionId={}，reportYear={}",
+            currentUser.getUserId(), submissionId, req.getSubmissionId(), req.getReportYear());
         SubmissionForm form = submissionFormRepository.findById(submissionId).orElseThrow(() -> new BizException("填报单不存在"));
         if (req.getSubmissionId() != null && !submissionId.equals(req.getSubmissionId())) {
             throw new BizException("提交单据不匹配");
@@ -115,6 +124,7 @@ public class SubmissionService {
         }
         submissionFormRepository.save(form);
         saveSubmissionContent(form, req);
+        touchUpdatedAt(form);
         auditService.log(
             currentUser.getUserId(),
             "SUBMISSION",
@@ -122,12 +132,16 @@ public class SubmissionService {
             String.valueOf(form.getId()),
             "管理员保存修改，单据号: " + resolveDocumentNo(form)
         );
+        log.info("[填报] 管理员保存修改成功，operatorId={}，submissionId={}，documentNo={}，status={}，updatedAt={}",
+            currentUser.getUserId(), form.getId(), resolveDocumentNo(form), form.getStatus(), form.getUpdatedAt());
         return detail(form, currentUser);
     }
 
     @Transactional
     public SubmissionDetailVO submit(Long submissionId, CurrentUser currentUser) {
         Long enterpriseId = requireEnterpriseId(currentUser);
+        log.info("[填报] 开始提交审批，userId={}，enterpriseId={}，submissionId={}",
+            currentUser.getUserId(), enterpriseId, submissionId);
         SubmissionForm form = submissionFormRepository.findById(submissionId).orElseThrow(() -> new BizException("填报单不存在"));
         assertOwner(form, enterpriseId);
         assertLatestSubmission(form, enterpriseId);
@@ -161,6 +175,8 @@ public class SubmissionService {
             String.valueOf(form.getId()),
             "提交审批，单据号: " + resolveDocumentNo(form)
         );
+        log.info("[填报] 提交审批成功，userId={}，enterpriseId={}，submissionId={}，documentNo={}，submittedAt={}",
+            currentUser.getUserId(), enterpriseId, form.getId(), resolveDocumentNo(form), form.getSubmittedAt());
         return detail(form, currentUser);
     }
 
@@ -194,11 +210,16 @@ public class SubmissionService {
     @Transactional
     public void updateReviewNode(Long submissionId, SubmissionStatus status, Integer nodeSeq, String nodeName) {
         SubmissionForm form = getByIdOrThrow(submissionId);
+        SubmissionStatus beforeStatus = form.getStatus();
+        Integer beforeNodeSeq = form.getCurrentNodeSeq();
+        String beforeNodeName = form.getCurrentNodeName();
         form.setStatus(status);
         form.setCurrentNodeSeq(nodeSeq);
         form.setCurrentNodeName(nodeName);
         form.setLastActionAt(LocalDateTime.now());
         submissionFormRepository.save(form);
+        log.info("[填报] 审批节点已更新，submissionId={}，documentNo={}，fromStatus={}，toStatus={}，fromNodeSeq={}，toNodeSeq={}，fromNodeName={}，toNodeName={}",
+            submissionId, resolveDocumentNo(form), beforeStatus, status, beforeNodeSeq, nodeSeq, beforeNodeName, nodeName);
     }
 
     public SubmissionDetailVO detail(SubmissionForm form, CurrentUser currentUser) {
@@ -425,6 +446,11 @@ public class SubmissionService {
         SubmissionBasicInfo basicInfo = submissionBasicInfoRepository.findBySubmissionId(form.getId()).orElse(null);
         String enterpriseName = basicInfo == null ? null : basicInfo.getEnterpriseName();
         return generateUniqueDocumentNo(enterpriseName, form.getId());
+    }
+
+    private void touchUpdatedAt(SubmissionForm form) {
+        form.setUpdatedAt(LocalDateTime.now());
+        submissionFormRepository.save(form);
     }
 
     private String generateUniqueDocumentNo(String enterpriseName, Long submissionId) {

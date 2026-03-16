@@ -76,37 +76,37 @@ public class QfClientService {
         String policyName = require(appProperties.getExternal().getQf().getPolicyName(), "app.external.qf.policy-name 未配置");
         String policyPwd = require(appProperties.getExternal().getQf().getPolicyPwd(), "app.external.qf.policy-pwd 未配置");
         String apiName = require(appProperties.getExternal().getQf().getSsoApiName(), "app.external.qf.sso-api-name 未配置");
-        log.info("[SSO][QF] fetch user start, baseUrl={}, apiName={}, ecspcode={}, policyName={}",
+        log.info("[单点登录][企服] 开始获取用户信息，baseUrl={}，apiName={}，ecspcode={}，policyName={}",
             baseUrl, apiName, code, policyName);
 
         String token = getToken(baseUrl, policyName, policyPwd);
-        log.info("[SSO][QF] platform token acquired, token={}", token);
+        log.info("[单点登录][企服] 已获取平台 token，token={}", token);
         String desRaw = callAccess(baseUrl, token, apiName, "token=" + code, policyPwd);
-        log.info("[SSO][QF] access des-decrypted payload length={}, payload={}", desRaw.length(), desRaw);
+        log.info("[单点登录][企服] access 接口 DES 解密后报文长度={}，内容={}", desRaw.length(), desRaw);
         String sm4CipherText = extractSsoCipherText(desRaw);
-        log.info("[SSO][QF] extracted SM4 cipher text length={}, cipherText={}", sm4CipherText.length(), sm4CipherText);
+        log.info("[单点登录][企服] 已提取 SM4 密文，长度={}，内容={}", sm4CipherText.length(), sm4CipherText);
         String sm4Key = code.substring(0, 16);
-        log.info("[SSO][QF] sm4 key from ecspcode prefix, key={}", sm4Key);
+        log.info("[单点登录][企服] 使用 ecspcode 前缀作为 SM4 密钥，key={}", sm4Key);
         String rawUser = decryptSm4(sm4CipherText, sm4Key);
-        log.info("[SSO][QF] sm4 decrypted json length={}, rawUser={}", rawUser.length(), rawUser);
+        log.info("[单点登录][企服] SM4 解密后的用户 JSON 长度={}，内容={}", rawUser.length(), rawUser);
         Map<String, Object> userMap = parseObjectMap(rawUser, "解析SSO用户信息失败");
         if (!hasValidSsoUserInfo(userMap)) {
-            log.warn("[SSO][QF] parsed user info invalid, keys={}", userMap.keySet());
+            log.warn("[单点登录][企服] 解析后的用户信息无效，字段={}", userMap.keySet());
             throw new BizException("没有获取到有效的用户信息");
         }
-        log.info("[SSO][QF] parsed user map keys={}", userMap.keySet());
+        log.info("[单点登录][企服] 解析后的用户字段={}", userMap.keySet());
         return userMap;
     }
 
     private String getToken(String baseUrl, String policyName, String policyPwd) {
         if (cachedToken != null && tokenExpireAt != null && LocalDateTime.now().isBefore(tokenExpireAt.minusMinutes(2))) {
-            log.info("[SSO][QF] using cached platform token, expireAt={}", tokenExpireAt);
+            log.info("[单点登录][企服] 使用缓存的平台 token，过期时间={}", tokenExpireAt);
             return cachedToken;
         }
 
         String time = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH:mm:ss.SSS"));
         String sign = cryptoUtils.md5Lower32(time + policyName + policyPwd);
-        log.info("[SSO][QF] requesting /token, time={}, sign={}", time, sign);
+        log.info("[单点登录][企服] 开始请求 /token，time={}，sign={}", time, sign);
 
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("time", time);
@@ -114,18 +114,18 @@ public class QfClientService {
         form.add("loginSign", sign);
 
         Map<String, Object> json = postForm(baseUrl + "/token", form);
-        log.info("[SSO][QF] /token response code={}, msg={}", json.get("code"), json.get("msg"));
+        log.info("[单点登录][企服] /token 响应，code={}，msg={}", json.get("code"), json.get("msg"));
         if (!Integer.valueOf(1).equals(parseCode(json))) {
             throw new BizException("获取企服平台token失败: " + json.get("msg"));
         }
         cachedToken = String.valueOf(json.get("data"));
         tokenExpireAt = LocalDateTime.now().plusHours(2);
-        log.info("[SSO][QF] /token success, token={}, expireAt={}", cachedToken, tokenExpireAt);
+        log.info("[单点登录][企服] /token 调用成功，token={}，过期时间={}", cachedToken, tokenExpireAt);
         return cachedToken;
     }
 
     private String callAccess(String baseUrl, String token, String apiName, String rawData, String policyPwd) {
-        log.info("[SSO][QF] requesting /access, apiName={}, rawData={}, token={}",
+        log.info("[单点登录][企服] 开始请求 /access，apiName={}，rawData={}，token={}",
             apiName, rawData, token);
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("token", token);
@@ -133,7 +133,7 @@ public class QfClientService {
         form.add("data", cryptoUtils.desEncrypt(rawData, policyPwd));
 
         Map<String, Object> json = postForm(baseUrl + "/access", form);
-        log.info("[SSO][QF] /access response code={}, msg={}", json.get("code"), json.get("msg"));
+        log.info("[单点登录][企服] /access 响应，code={}，msg={}", json.get("code"), json.get("msg"));
         if (!Integer.valueOf(1).equals(parseCode(json))) {
             throw new BizException("调用企服平台接口失败: " + json.get("msg"));
         }
@@ -142,7 +142,7 @@ public class QfClientService {
             throw new BizException("企服平台返回空数据");
         }
         String decrypted = cryptoUtils.desDecrypt(String.valueOf(data), policyPwd);
-        log.info("[SSO][QF] /access data DES decrypt success, length={}, data={}", decrypted.length(), decrypted);
+        log.info("[单点登录][企服] /access 数据 DES 解密成功，长度={}，内容={}", decrypted.length(), decrypted);
         return decrypted;
     }
 
@@ -150,10 +150,10 @@ public class QfClientService {
         org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
         org.springframework.http.HttpEntity<MultiValueMap<String, String>> req = new org.springframework.http.HttpEntity<>(form, headers);
-        log.info("[SSO][QF] POST request url={}, headers={}, form={}", url, headers, form.toSingleValueMap());
+        log.info("[单点登录][企服] POST 请求，url={}，headers={}，form={}", url, headers, form.toSingleValueMap());
         ResponseEntity<String> response = restTemplate.postForEntity(url, req, String.class);
         String body = response.getBody();
-        log.info("[SSO][QF] POST response url={}, status={}, headers={}, bodyLength={}, body={}",
+        log.info("[单点登录][企服] POST 响应，url={}，status={}，headers={}，bodyLength={}，body={}",
             url,
             response.getStatusCode().value(),
             response.getHeaders(),
@@ -199,12 +199,12 @@ public class QfClientService {
     private String decryptSm4(String cipherText, String key16) {
         try {
             String raw = SM4Utils.decryptData_ECB(cipherText, key16);
-            log.info("[SSO][QF] SM4 ECB decrypt success");
+            log.info("[单点登录][企服] SM4 ECB 解密成功");
             return raw;
         } catch (Exception e) {
             try {
                 String raw = SM4Utils.decryptData_CBC(cipherText, key16, key16);
-                log.info("[SSO][QF] SM4 CBC decrypt success");
+                log.info("[单点登录][企服] SM4 CBC 解密成功");
                 return raw;
             } catch (Exception ex) {
                 throw new BizException("SM4解密用户信息失败");

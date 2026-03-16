@@ -39,3 +39,16 @@ frontend/dist/
 /scripts/
 /uploads/
 /logs/
+docker/dm8/data/DAMENG/DAMENG01.log
+docker/dm8/data/DAMENG/DAMENG02.log
+docker/dm8/data/DAMENG/dm_service.prikey
+docker/dm8/data/DAMENG/dm.ctl
+docker/dm8/data/DAMENG/dm.ini
+docker/dm8/data/DAMENG/dmtemp.ctl
+docker/dm8/data/DAMENG/MAIN.DBF
+docker/dm8/data/DAMENG/ROLL.DBF
+docker/dm8/data/DAMENG/sqllog.ini
+docker/dm8/data/DAMENG/SYSTEM.DBF
+docker/dm8/data/DAMENG/TEMP.DBF
+docker/dm8/data/DAMENG/ctl_bak/dm_20260316030642_722070.ctl
+docker/dm8/data/DAMENG/ctl_bak/dm_20260316030702_872298.ctl

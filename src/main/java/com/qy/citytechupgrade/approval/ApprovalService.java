@@ -22,6 +22,7 @@ import com.qy.citytechupgrade.user.UserService;
 import com.qy.citytechupgrade.workflow.*;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -32,6 +33,7 @@ import java.util.List;
 import java.util.Locale;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class ApprovalService {
     private final WfInstanceRepository wfInstanceRepository;
@@ -46,6 +48,8 @@ public class ApprovalService {
 
     @Transactional
     public void startWorkflowForSubmission(Long submissionId, CurrentUser operator) {
+        log.info("[审批] 开始发起流程，submissionId={}，operatorId={}，roles={}",
+            submissionId, operator.getUserId(), operator.getRoles());
         SubmissionForm form = submissionService.getByIdOrThrow(submissionId);
         if (form.getStatus() != SubmissionStatus.SUBMITTED) {
             throw new BizException("当前单据不在可提交流程状态");
@@ -56,6 +60,7 @@ public class ApprovalService {
             notifyEnterpriseUsers(submissionId, "审批结果通知", "单据号 " + documentNo + " 已自动通过");
             auditService.log(operator.getUserId(), "WORKFLOW", "AUTO_APPROVE", String.valueOf(submissionId),
                 "审批开关关闭，自动通过，单据号: " + documentNo);
+            log.info("[审批] 流程自动通过，submissionId={}，documentNo={}", submissionId, documentNo);
             return;
         }
 
@@ -96,6 +101,8 @@ public class ApprovalService {
         notifyApprovers(firstNode.getRoleCode(), "您有新的待审批单据", "单据号 " + documentNo + " 已进入审批");
 
         auditService.log(operator.getUserId(), "WORKFLOW", "START", String.valueOf(submissionId), "发起审批流程，单据号: " + documentNo);
+        log.info("[审批] 流程已发起，submissionId={}，documentNo={}，instanceId={}，templateId={}，firstTaskId={}，firstNodeSeq={}，firstNodeName={}，roleCode={}",
+            submissionId, documentNo, instance.getId(), template.getId(), task.getId(), firstNode.getNodeSeq(), firstNode.getNodeName(), firstNode.getRoleCode());
     }
 
     public PagedResult<ApprovalTaskVO> todo(
@@ -169,6 +176,8 @@ public class ApprovalService {
 
     @Transactional
     public SubmissionDetailVO submitEditedSubmission(Long submissionId, CurrentUser operator) {
+        log.info("[审批] 管理员开始提交修改后的单据，submissionId={}，operatorId={}，roles={}",
+            submissionId, operator.getUserId(), operator.getRoles());
         SubmissionForm form = submissionService.getByIdOrThrow(submissionId);
         if (!submissionService.isApproverEditableStatus(form.getStatus())) {
             throw new BizException("当前状态不允许管理员提交修改");
@@ -185,11 +194,15 @@ public class ApprovalService {
         notifyEnterpriseUsers(submissionId, "审批结果通知", "单据号 " + documentNo + " 已由管理员修改后确认通过");
         auditService.log(operator.getUserId(), "APPROVAL", "ADMIN_EDIT_APPROVE", String.valueOf(submissionId),
             "管理员修改后提交并确认通过，单据号: " + documentNo);
+        log.info("[审批] 管理员提交修改后的单据成功，submissionId={}，documentNo={}，operatorId={}",
+            submissionId, documentNo, operator.getUserId());
         return submissionService.detail(refreshed, operator);
     }
 
     @Transactional
     public SubmissionDetailVO returnApprovedSubmission(Long submissionId, String comment, CurrentUser operator) {
+        log.info("[审批] 管理员开始退回已通过单据，submissionId={}，operatorId={}，comment={}",
+            submissionId, operator.getUserId(), comment);
         SubmissionForm form = submissionService.getByIdOrThrow(submissionId);
         if (form.getStatus() != SubmissionStatus.APPROVED) {
             throw new BizException("仅已审批通过的填报支持退回企业");
@@ -209,10 +222,14 @@ public class ApprovalService {
         );
         auditService.log(operator.getUserId(), "APPROVAL", "ADMIN_RETURN_APPROVED", String.valueOf(submissionId),
             buildAuditDetail(documentNo, "管理员退回企业", comment));
+        log.info("[审批] 管理员退回已通过单据成功，submissionId={}，documentNo={}，operatorId={}",
+            submissionId, documentNo, operator.getUserId());
         return submissionService.detail(refreshed, operator);
     }
 
     private void handle(Long taskId, TaskAction action, String comment, CurrentUser operator) {
+        log.info("[审批] 开始处理任务，taskId={}，action={}，operatorId={}，roles={}，comment={}",
+            taskId, action, operator.getUserId(), operator.getRoles(), comment);
         WfTask task = wfTaskRepository.findById(taskId).orElseThrow(() -> new BizException("审批任务不存在"));
         if (task.getStatus() != TaskStatus.TODO) {
             throw new BizException("该任务已处理");
@@ -232,6 +249,8 @@ public class ApprovalService {
         task.setAssigneeUserId(operator.getUserId());
         task.setHandledAt(LocalDateTime.now());
         wfTaskRepository.save(task);
+        log.info("[审批] 任务已处理完成，taskId={}，instanceId={}，submissionId={}，action={}，operatorId={}",
+            task.getId(), task.getInstanceId(), submissionId, action, operator.getUserId());
 
         if (action == TaskAction.APPROVE) {
             onApprove(instance, task, submissionId, operator, comment);
@@ -250,6 +269,8 @@ public class ApprovalService {
             .orElse(null);
 
         if (next == null) {
+            log.info("[审批] 当前任务通过后到达最终节点，taskId={}，submissionId={}，operatorId={}",
+                currentTask.getId(), submissionId, operator.getUserId());
             onFinish(instance, submissionId, SubmissionStatus.APPROVED, operator, "审批通过", comment);
             return;
         }
@@ -274,6 +295,8 @@ public class ApprovalService {
 
         auditService.log(operator.getUserId(), "APPROVAL", "APPROVE", String.valueOf(submissionId),
             "节点通过，单据号: " + documentNo);
+        log.info("[审批] 任务已流转到下一节点，submissionId={}，documentNo={}，nextTaskId={}，nextNodeSeq={}，nextNodeName={}，nextRoleCode={}",
+            submissionId, documentNo, nextTask.getId(), next.getNodeSeq(), next.getNodeName(), next.getRoleCode());
     }
 
     private void onFinish(WfInstance instance,
@@ -294,6 +317,8 @@ public class ApprovalService {
             "单据号 " + documentNo + " 处理结果: " + actionName + (comment == null || comment.isBlank() ? "" : "，意见: " + comment));
         auditService.log(operator.getUserId(), "APPROVAL", actionName, String.valueOf(submissionId),
             buildAuditDetail(documentNo, actionName, comment));
+        log.info("[审批] 流程处理完成，submissionId={}，documentNo={}，resultStatus={}，actionName={}，operatorId={}，comment={}",
+            submissionId, documentNo, status, actionName, operator.getUserId(), comment);
     }
 
     private String buildAuditDetail(String documentNo, String actionName, String comment) {

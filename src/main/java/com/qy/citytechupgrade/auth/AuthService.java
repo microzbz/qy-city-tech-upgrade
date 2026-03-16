@@ -71,11 +71,11 @@ public class AuthService {
 
     @Transactional
     public LoginResponse ssoLogin(String ecspCode) {
-        log.info("[SSO] service start, ecspcode={}, ecspcode.len={}", ecspCode, ecspCode == null ? 0 : ecspCode.length());
+        log.info("[单点登录] 服务开始处理，ecspcode={}，ecspcode 长度={}", ecspCode, ecspCode == null ? 0 : ecspCode.length());
         Map<String, Object> userInfo = qfClientService.fetchSsoUserInfo(ecspCode);
-        log.info("[SSO] user info fetched, userInfo={}", userInfo);
+        log.info("[单点登录] 已获取用户信息，userInfo={}", userInfo);
         SysUser user = upsertSsoUser(userInfo);
-        log.info("[SSO] user upsert done, userId={}, username={}, enterpriseId={}", user.getId(), user.getUsername(), user.getEnterpriseId());
+        log.info("[单点登录] 用户落库完成，userId={}，username={}，enterpriseId={}", user.getId(), user.getUsername(), user.getEnterpriseId());
 
         if (user.getStatus() != UserStatus.ACTIVE) {
             throw new BizException("账号已被禁用");
@@ -83,7 +83,7 @@ public class AuthService {
 
         userService.ensureRole(user.getId(), RoleCode.ENTERPRISE_USER.name());
         List<String> roles = userService.getRoleCodesByUserId(user.getId());
-        log.info("[SSO] roles after ensureRole, userId={}, roles={}", user.getId(), roles);
+        log.info("[单点登录] 角色补齐后结果，userId={}，roles={}", user.getId(), roles);
         String token = jwtTokenService.createToken(
             user.getId(),
             user.getUsername(),
@@ -91,12 +91,12 @@ public class AuthService {
             user.getEnterpriseId(),
             roles
         );
-        log.info("[SSO] jwt created, userId={}, token.len={}", user.getId(), token == null ? 0 : token.length());
+        log.info("[单点登录] JWT 已生成，userId={}，token 长度={}", user.getId(), token == null ? 0 : token.length());
 
         user.setLastLoginAt(LocalDateTime.now());
         userService.save(user);
         auditService.log(user.getId(), "AUTH", "SSO_LOGIN", null, "SSO登录成功");
-        log.info("[SSO] service success, userId={}, username={}", user.getId(), user.getUsername());
+        log.info("[单点登录] 服务处理完成，userId={}，username={}", user.getId(), user.getUsername());
         return buildLoginResponse(user, roles, token);
     }
 
@@ -118,12 +118,12 @@ public class AuthService {
         if (!StringUtils.hasText(externalId)) {
             throw new BizException("SSO用户标识缺失");
         }
-        log.info("[SSO] resolve externalId={}, usertype={}", externalId, readString(userInfo, "usertype"));
+        log.info("[单点登录] 解析外部用户标识，externalId={}，usertype={}", externalId, readString(userInfo, "usertype"));
 
         String username = resolveSsoUsername(userInfo, externalId);
         SysUser existingUser = userService.findByUsername(username).orElse(null);
         if (existingUser != null) {
-            log.info("[SSO] existing user found, skip profile sync, userId={}, username={}, enterpriseId={}",
+            log.info("[单点登录] 已存在用户，跳过资料同步，userId={}，username={}，enterpriseId={}",
                 existingUser.getId(), existingUser.getUsername(), existingUser.getEnterpriseId());
             return existingUser;
         }
@@ -138,7 +138,7 @@ public class AuthService {
         user.setStatus(UserStatus.ACTIVE);
         user.setDisplayName(limit(displayName, 128));
         user.setEnterpriseId(enterprise == null ? null : enterprise.getId());
-        log.info("[SSO] preparing user save, username={}, displayName={}, enterpriseId={}, isNew={}",
+        log.info("[单点登录] 准备保存用户，username={}，displayName={}，enterpriseId={}，isNew={}",
             username, displayName, enterprise == null ? null : enterprise.getId(), isNew);
         return userService.save(user);
     }
@@ -148,7 +148,7 @@ public class AuthService {
         String creditCode = resolveCreditCode(enterpriseInfo, userInfo, externalId);
         EnterpriseProfile existingEnterprise = enterpriseProfileRepository.findByCreditCode(creditCode).orElse(null);
         if (existingEnterprise != null) {
-            log.info("[SSO] existing enterprise found, skip profile sync, id={}, creditCode={}, enterpriseName={}",
+            log.info("[单点登录] 已存在企业，跳过资料同步，id={}，creditCode={}，enterpriseName={}",
                 existingEnterprise.getId(), existingEnterprise.getCreditCode(), existingEnterprise.getEnterpriseName());
             return existingEnterprise;
         }
@@ -161,7 +161,7 @@ public class AuthService {
             readString(userInfo, "userName"),
             "企服企业_" + externalId
         );
-        log.info("[SSO] enterprise upsert start, creditCode={}, enterpriseName={}", creditCode, enterpriseName);
+        log.info("[单点登录] 企业落库开始，creditCode={}，enterpriseName={}", creditCode, enterpriseName);
 
         EnterpriseProfile enterprise = new EnterpriseProfile();
         enterprise.setCreditCode(creditCode);
@@ -174,10 +174,10 @@ public class AuthService {
             if (StringUtils.hasText(surveyIndustryInfo.industryName())) {
                 enterprise.setIndustryName(limit(surveyIndustryInfo.industryName(), 255));
             }
-            log.info("[SSO] survey enterprise industry matched, enterpriseName={}, industryCode={}, industryName={}",
+            log.info("[单点登录] 已匹配调研企业行业信息，enterpriseName={}，industryCode={}，industryName={}",
                 enterpriseName, surveyIndustryInfo.industryCode(), surveyIndustryInfo.industryName());
         } else {
-            log.info("[SSO] survey enterprise industry not found, enterpriseName={}", enterpriseName);
+            log.info("[单点登录] 未匹配到调研企业行业信息，enterpriseName={}", enterpriseName);
         }
         String legalPerson = firstNonBlank(readString(enterpriseInfo, "legalPerson"), readString(userInfo, "legalPerson"));
         if (StringUtils.hasText(legalPerson)) {
@@ -201,7 +201,7 @@ public class AuthService {
         }
         enterprise.setDataSource("SSO");
         EnterpriseProfile saved = enterpriseProfileRepository.save(enterprise);
-        log.info("[SSO] enterprise upsert done, id={}, creditCode={}, dataSource={}",
+        log.info("[单点登录] 企业落库完成，id={}，creditCode={}，dataSource={}",
             saved.getId(), saved.getCreditCode(), saved.getDataSource());
         return saved;
     }

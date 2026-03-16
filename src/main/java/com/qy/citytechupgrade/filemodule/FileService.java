@@ -14,6 +14,7 @@ import jakarta.transaction.Transactional;
 import lombok.Builder;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -32,6 +33,7 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class FileService {
     private static final Set<String> DIRECT_PREVIEW_EXT = Set.of(
@@ -55,6 +57,9 @@ public class FileService {
                                    String attachmentType,
                                    MultipartFile file,
                                    CurrentUser currentUser) {
+        log.info("[文件] 开始上传附件，submissionId={}，attachmentType={}，userId={}，roles={}，fileName={}，size={}",
+            submissionId, attachmentType, currentUser.getUserId(), currentUser.getRoles(),
+            file == null ? null : file.getOriginalFilename(), file == null ? 0 : file.getSize());
         if (file == null || file.isEmpty()) {
             throw new BizException("上传文件不能为空");
         }
@@ -110,6 +115,8 @@ public class FileService {
 
         auditService.log(currentUser.getUserId(), "FILE", "UPLOAD",
             String.valueOf(submissionId), attachmentType + ":" + file.getOriginalFilename());
+        log.info("[文件] 附件上传成功，submissionId={}，attachmentType={}，userId={}，storedPath={}，fileName={}",
+            submissionId, attachmentType, currentUser.getUserId(), target.toAbsolutePath(), file.getOriginalFilename());
 
         return FileUploadResult.builder().path(relativePath).fileName(file.getOriginalFilename()).build();
     }
@@ -149,6 +156,8 @@ public class FileService {
 
     @Transactional
     public void deleteFile(Long attachmentId, CurrentUser currentUser) {
+        log.info("[文件] 开始删除附件，attachmentId={}，userId={}，roles={}",
+            attachmentId, currentUser.getUserId(), currentUser.getRoles());
         SubmissionAttachment attachment = submissionAttachmentRepository.findById(attachmentId)
             .orElseThrow(() -> new BizException("附件不存在"));
         SubmissionForm form = submissionFormRepository.findById(attachment.getSubmissionId())
@@ -185,6 +194,8 @@ public class FileService {
         submissionAttachmentRepository.delete(attachment);
         auditService.log(currentUser.getUserId(), "FILE", "DELETE",
             String.valueOf(form.getId()), attachment.getAttachmentType() + ":" + attachment.getOriginalFileName());
+        log.info("[文件] 附件删除成功，attachmentId={}，submissionId={}，attachmentType={}，fileName={}，userId={}",
+            attachmentId, form.getId(), attachment.getAttachmentType(), attachment.getOriginalFileName(), currentUser.getUserId());
     }
 
     private AttachmentResolved resolveAttachment(Long attachmentId, CurrentUser currentUser) {
@@ -240,9 +251,13 @@ public class FileService {
         try {
             Files.createDirectories(previewDir);
             if (Files.exists(output) && Files.getLastModifiedTime(output).toMillis() >= Files.getLastModifiedTime(sourcePath).toMillis()) {
+                log.info("[文件] 预览转换命中缓存，attachmentId={}，sourcePath={}，outputPath={}",
+                    attachmentId, sourcePath, output);
                 return output;
             }
 
+            log.info("[文件] 开始执行预览转换，attachmentId={}，sourcePath={}，outputPath={}",
+                attachmentId, sourcePath, output);
             ProcessBuilder pb = new ProcessBuilder(
                 "libreoffice",
                 "--headless",
@@ -257,16 +272,23 @@ public class FileService {
             boolean finished = process.waitFor(60, TimeUnit.SECONDS);
             if (!finished) {
                 process.destroyForcibly();
+                log.warn("[文件] 预览转换超时，attachmentId={}，sourcePath={}", attachmentId, sourcePath);
                 throw new BizException("文档预览转换超时");
             }
             if (process.exitValue() != 0 || !Files.exists(output)) {
+                log.warn("[文件] 预览转换失败，attachmentId={}，sourcePath={}，exitCode={}",
+                    attachmentId, sourcePath, process.exitValue());
                 throw new BizException("文档预览转换失败");
             }
+            log.info("[文件] 预览转换成功，attachmentId={}，sourcePath={}，outputPath={}",
+                attachmentId, sourcePath, output);
             return output;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            log.warn("[文件] 预览转换被中断，attachmentId={}，sourcePath={}", attachmentId, sourcePath, e);
             throw new BizException("文档预览转换失败: " + e.getMessage());
         } catch (IOException e) {
+            log.warn("[文件] 预览转换发生 IO 异常，attachmentId={}，sourcePath={}", attachmentId, sourcePath, e);
             throw new BizException("文档预览转换失败: " + e.getMessage());
         }
     }

@@ -1,6 +1,13 @@
 package com.qy.citytechupgrade.submission;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -18,16 +25,13 @@ public class SubmissionDeviceInfo {
     @Column(name = "submission_id", nullable = false, unique = true)
     private Long submissionId;
 
-    @Lob
-    @Column(name = "selected_processes_json")
+    @Column(name = "selected_processes_json", length = 2000)
     private String selectedProcessesJson;
 
-    @Lob
-    @Column(name = "selected_equipments_json")
+    @Column(name = "selected_equipments_json", length = 2000)
     private String selectedEquipmentsJson;
 
-    @Lob
-    @Column(name = "info_devices_json")
+    @Column(name = "info_devices_json", length = 2000)
     private String infoDevicesJson;
 
     @Column(name = "other_process", length = 1000)

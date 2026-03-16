@@ -2,5 +2,7 @@ export function formatDateTime(value) {
   if (!value) {
     return '-'
   }
-  return `${value}`.replace('T', ' ')
+  const text = `${value}`.trim().replace('T', ' ')
+  const normalized = text.replace(/\.\d+$/, '')
+  return normalized.length > 19 ? normalized.slice(0, 19) : normalized
 }

@@ -11,6 +11,7 @@ import com.qy.citytechupgrade.workflow.WfTemplateNodeRepository;
 import com.qy.citytechupgrade.workflow.WfTemplateRepository;
 import com.qy.citytechupgrade.workflow.WorkflowService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
@@ -20,6 +21,7 @@ import java.util.Objects;
 
 @Component
 @RequiredArgsConstructor
+@ConditionalOnProperty(prefix = "app.init", name = "demo-data-enabled", havingValue = "true", matchIfMissing = true)
 public class DataInitializer implements CommandLineRunner {
     private static final String SUPER_ADMIN_USERNAME = "qydevelop";
     private static final String LEGACY_ADMIN_USERNAME = "admin";

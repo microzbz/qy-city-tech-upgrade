@@ -30,17 +30,17 @@ public class AuthController {
     @PostMapping("/sso-login")
     public ApiResponse<LoginResponse> ssoLogin(@RequestBody @Valid SsoLoginRequest request) {
         String code = request.getToken();
-        log.info("[SSO] /api/auth/sso-login request received, request={}", request);
+        log.info("[单点登录] 收到 /api/auth/sso-login 请求，request={}", request);
         try {
             LoginResponse response = authService.ssoLogin(code);
             ApiResponse<LoginResponse> apiResponse = ApiResponse.success(response);
-            log.info("[SSO] /api/auth/sso-login success, userId={}, username={}",
+            log.info("[单点登录] /api/auth/sso-login 调用成功，userId={}，username={}",
                 response.getUserInfo() == null ? null : response.getUserInfo().getUserId(),
                 response.getUserInfo() == null ? null : response.getUserInfo().getUsername());
-            log.info("[SSO] /api/auth/sso-login response={}", apiResponse);
+            log.info("[单点登录] /api/auth/sso-login 响应={}", apiResponse);
             return apiResponse;
         } catch (Exception e) {
-            log.error("[SSO] /api/auth/sso-login failed, token={}, message={}", code, e.getMessage(), e);
+            log.error("[单点登录] /api/auth/sso-login 调用失败，token={}，message={}", code, e.getMessage(), e);
             throw e;
         }
     }

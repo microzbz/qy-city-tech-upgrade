@@ -65,6 +65,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
@@ -73,6 +75,7 @@ public class SubmissionExportService {
     private static final DateTimeFormatter FILE_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private static final DateTimeFormatter DISPLAY_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final String OTHER_OPTION = "其他";
+    private static final Pattern HTML_NAMED_ENTITY_PATTERN = Pattern.compile("&([A-Za-z][A-Za-z0-9]+);");
     private static final Set<SubmissionStatus> APPROVED_RECORD_STATUSES = Set.of(
         SubmissionStatus.APPROVED,
         SubmissionStatus.RETURNED,
@@ -309,8 +312,30 @@ public class SubmissionExportService {
         if (html == null) {
             return "";
         }
-        return html
-            .replace("&nbsp;", "&#160;");
+        Matcher matcher = HTML_NAMED_ENTITY_PATTERN.matcher(html);
+        StringBuffer normalized = new StringBuffer();
+        while (matcher.find()) {
+            String token = matcher.group();
+            String replacement = normalizeNamedEntity(token);
+            matcher.appendReplacement(normalized, Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(normalized);
+        return normalized.toString();
+    }
+
+    private String normalizeNamedEntity(String token) {
+        if ("&amp;".equals(token)
+            || "&lt;".equals(token)
+            || "&gt;".equals(token)
+            || "&quot;".equals(token)
+            || "&apos;".equals(token)) {
+            return token;
+        }
+        String decoded = HtmlUtils.htmlUnescape(token);
+        if (!token.equals(decoded)) {
+            return decoded;
+        }
+        return "&amp;" + token.substring(1);
     }
 
     private String buildPdfHtml(SubmissionDetailVO detail, String exportCode) {

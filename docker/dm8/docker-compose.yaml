@@ -1,0 +1,20 @@
+services:
+  dm8:
+    image: cnxc/dm8:20251114-kylin
+    container_name: city-tech-upgrade-dm8
+    restart: unless-stopped
+    privileged: true
+    shm_size: 1g
+    environment:
+      TZ: Asia/Shanghai
+      INSTANCE_NAME: DMSERVER
+      SYSDBA_PWD: SysdbA123
+      CASE_SENSITIVE: "Y"
+      PAGE_SIZE: "16"
+      EXTENT_SIZE: "32"
+      UNICODE_FLAG: "1"
+    ports:
+      - "5236:5236"
+    volumes:
+      - ./data:/opt/dmdbms/data
+      - ./archive:/opt/dmdbms/archive
