@@ -574,7 +574,9 @@ const fillForm = async (data) => {
     otherTool: data.rdToolInfo?.otherTool || ''
   }
   attachments.value = data.attachments || []
-  await syncIndustryCodeByEnterpriseName()
+  if (!`${form.basicInfo.industryCode || ''}`.trim()) {
+    await syncIndustryCodeByEnterpriseName()
+  }
   await loadProcesses()
   await loadEquipments()
   dirty.value = false

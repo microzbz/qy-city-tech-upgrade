@@ -65,6 +65,12 @@ public class EnterpriseProfile {
     @Column(name = "contact_phone", length = 64)
     private String contactPhone;
 
+    @Column(name = "contact_cert_no", length = 64)
+    private String contactCertNo;
+
+    @Column(name = "contact_cert_type", length = 32)
+    private String contactCertType;
+
     @Column(name = "data_source", nullable = false, length = 32)
     private String dataSource;
 

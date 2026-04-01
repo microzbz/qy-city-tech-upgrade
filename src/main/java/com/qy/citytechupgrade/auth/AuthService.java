@@ -26,6 +26,7 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 @Service
@@ -120,16 +121,30 @@ public class AuthService {
         }
         log.info("[单点登录] 解析外部用户标识，externalId={}，usertype={}", externalId, readString(userInfo, "usertype"));
 
+        EnterpriseProfile enterprise = createOrSyncSsoEnterprise(userInfo, externalId);
         String username = resolveSsoUsername(userInfo, externalId);
         SysUser existingUser = userService.findByUsername(username).orElse(null);
         if (existingUser != null) {
+            boolean changed = false;
+            if (enterprise != null && !Objects.equals(existingUser.getEnterpriseId(), enterprise.getId())) {
+                existingUser.setEnterpriseId(enterprise.getId());
+                changed = true;
+            }
+            String displayName = firstNonBlank(readString(userInfo, "cn"), readString(userInfo, "linkPersonName"), username);
+            String limitedDisplayName = limit(displayName, 128);
+            if (!Objects.equals(existingUser.getDisplayName(), limitedDisplayName)) {
+                existingUser.setDisplayName(limitedDisplayName);
+                changed = true;
+            }
+            if (changed) {
+                existingUser = userService.save(existingUser);
+            }
             log.info("[单点登录] 已存在用户，跳过资料同步，userId={}，username={}，enterpriseId={}",
                 existingUser.getId(), existingUser.getUsername(), existingUser.getEnterpriseId());
             return existingUser;
         }
 
         String displayName = firstNonBlank(readString(userInfo, "cn"), readString(userInfo, "linkPersonName"), username);
-        EnterpriseProfile enterprise = createSsoEnterprise(userInfo, externalId);
 
         SysUser user = new SysUser();
         boolean isNew = true;
@@ -143,15 +158,10 @@ public class AuthService {
         return userService.save(user);
     }
 
-    private EnterpriseProfile createSsoEnterprise(Map<String, Object> userInfo, String externalId) {
+    private EnterpriseProfile createOrSyncSsoEnterprise(Map<String, Object> userInfo, String externalId) {
         Map<String, Object> enterpriseInfo = resolveEnterpriseInfo(userInfo);
         String creditCode = resolveCreditCode(enterpriseInfo, userInfo, externalId);
         EnterpriseProfile existingEnterprise = enterpriseProfileRepository.findByCreditCode(creditCode).orElse(null);
-        if (existingEnterprise != null) {
-            log.info("[单点登录] 已存在企业，跳过资料同步，id={}，creditCode={}，enterpriseName={}",
-                existingEnterprise.getId(), existingEnterprise.getCreditCode(), existingEnterprise.getEnterpriseName());
-            return existingEnterprise;
-        }
         String enterpriseName = firstNonBlank(
             readString(enterpriseInfo, "cn"),
             readString(enterpriseInfo, "enterpriseName"),
@@ -161,9 +171,10 @@ public class AuthService {
             readString(userInfo, "userName"),
             "企服企业_" + externalId
         );
-        log.info("[单点登录] 企业落库开始，creditCode={}，enterpriseName={}", creditCode, enterpriseName);
+        EnterpriseProfile enterprise = existingEnterprise == null ? new EnterpriseProfile() : existingEnterprise;
+        log.info("[单点登录] 企业资料同步开始，enterpriseId={}，creditCode={}，enterpriseName={}，isNew={}",
+            enterprise.getId(), creditCode, enterpriseName, existingEnterprise == null);
 
-        EnterpriseProfile enterprise = new EnterpriseProfile();
         enterprise.setCreditCode(creditCode);
         enterprise.setEnterpriseName(limit(enterpriseName, 255));
         EnterpriseService.SurveyIndustryInfo surveyIndustryInfo = enterpriseService.findSurveyIndustryInfo(enterpriseName);
@@ -179,6 +190,17 @@ public class AuthService {
         } else {
             log.info("[单点登录] 未匹配到调研企业行业信息，enterpriseName={}", enterpriseName);
         }
+        syncEnterpriseFieldsFromSso(enterprise, enterpriseInfo, userInfo);
+        enterprise.setDataSource("SSO");
+        EnterpriseProfile saved = enterpriseProfileRepository.save(enterprise);
+        log.info("[单点登录] 企业资料同步完成，id={}，creditCode={}，dataSource={}",
+            saved.getId(), saved.getCreditCode(), saved.getDataSource());
+        return saved;
+    }
+
+    private void syncEnterpriseFieldsFromSso(EnterpriseProfile enterprise,
+                                             Map<String, Object> enterpriseInfo,
+                                             Map<String, Object> userInfo) {
         String legalPerson = firstNonBlank(readString(enterpriseInfo, "legalPerson"), readString(userInfo, "legalPerson"));
         if (StringUtils.hasText(legalPerson)) {
             enterprise.setLegalPerson(limit(legalPerson, 128));
@@ -199,11 +221,22 @@ public class AuthService {
         if (StringUtils.hasText(contactPhone)) {
             enterprise.setContactPhone(limit(contactPhone, 64));
         }
-        enterprise.setDataSource("SSO");
-        EnterpriseProfile saved = enterpriseProfileRepository.save(enterprise);
-        log.info("[单点登录] 企业落库完成，id={}，creditCode={}，dataSource={}",
-            saved.getId(), saved.getCreditCode(), saved.getDataSource());
-        return saved;
+        String contactCertNo = firstNonBlank(
+            readString(enterpriseInfo, "linkPersonCode"),
+            readString(userInfo, "linkPersonCode"),
+            readString(enterpriseInfo, "contactCertNo")
+        );
+        if (StringUtils.hasText(contactCertNo)) {
+            enterprise.setContactCertNo(limit(contactCertNo, 64));
+        }
+        String contactCertType = firstNonBlank(
+            readString(enterpriseInfo, "linkPersonType"),
+            readString(userInfo, "linkPersonType"),
+            readString(enterpriseInfo, "contactCertType")
+        );
+        if (StringUtils.hasText(contactCertType)) {
+            enterprise.setContactCertType(limit(contactCertType, 32));
+        }
     }
 
     private String resolveCreditCode(Map<String, Object> enterpriseInfo, Map<String, Object> userInfo, String externalId) {

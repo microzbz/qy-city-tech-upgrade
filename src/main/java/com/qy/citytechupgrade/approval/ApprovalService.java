@@ -9,6 +9,7 @@ import com.qy.citytechupgrade.common.enums.WorkflowStatus;
 import com.qy.citytechupgrade.common.exception.BizException;
 import com.qy.citytechupgrade.common.security.CurrentUser;
 import com.qy.citytechupgrade.common.util.SubmissionNoUtils;
+import com.qy.citytechupgrade.notification.MsgCenterService;
 import com.qy.citytechupgrade.notification.NoticeService;
 import com.qy.citytechupgrade.submission.SubmissionBasicInfo;
 import com.qy.citytechupgrade.submission.SubmissionBasicInfoRepository;
@@ -43,6 +44,7 @@ public class ApprovalService {
     private final SubmissionFormRepository submissionFormRepository;
     private final SubmissionBasicInfoRepository submissionBasicInfoRepository;
     private final NoticeService noticeService;
+    private final MsgCenterService msgCenterService;
     private final UserService userService;
     private final AuditService auditService;
 
@@ -58,6 +60,7 @@ public class ApprovalService {
         if (!workflowService.isApprovalEnabled(WorkflowService.BIZ_TYPE_SUBMISSION)) {
             submissionService.updateReviewNode(submissionId, SubmissionStatus.APPROVED, null, null);
             notifyEnterpriseUsers(submissionId, "审批结果通知", "单据号 " + documentNo + " 已自动通过");
+            notifyEnterpriseContact(submissionId, SubmissionStatus.APPROVED, "自动通过", null);
             auditService.log(operator.getUserId(), "WORKFLOW", "AUTO_APPROVE", String.valueOf(submissionId),
                 "审批开关关闭，自动通过，单据号: " + documentNo);
             log.info("[审批] 流程自动通过，submissionId={}，documentNo={}", submissionId, documentNo);
@@ -192,6 +195,7 @@ public class ApprovalService {
         SubmissionForm refreshed = submissionService.getByIdOrThrow(submissionId);
         String documentNo = resolveDocumentNo(refreshed, submissionId);
         notifyEnterpriseUsers(submissionId, "审批结果通知", "单据号 " + documentNo + " 已由管理员修改后确认通过");
+        notifyEnterpriseContact(submissionId, SubmissionStatus.APPROVED, "管理员修改后确认通过", null);
         auditService.log(operator.getUserId(), "APPROVAL", "ADMIN_EDIT_APPROVE", String.valueOf(submissionId),
             "管理员修改后提交并确认通过，单据号: " + documentNo);
         log.info("[审批] 管理员提交修改后的单据成功，submissionId={}，documentNo={}，operatorId={}",
@@ -220,6 +224,7 @@ public class ApprovalService {
             "审批结果通知",
             "单据号 " + documentNo + " 已被管理员退回修改" + (StringUtils.hasText(comment) ? "，原因: " + comment : "")
         );
+        notifyEnterpriseContact(submissionId, SubmissionStatus.RETURNED, "管理员退回企业", comment);
         auditService.log(operator.getUserId(), "APPROVAL", "ADMIN_RETURN_APPROVED", String.valueOf(submissionId),
             buildAuditDetail(documentNo, "管理员退回企业", comment));
         log.info("[审批] 管理员退回已通过单据成功，submissionId={}，documentNo={}，operatorId={}",
@@ -315,6 +320,7 @@ public class ApprovalService {
         String documentNo = resolveDocumentNo(form, submissionId);
         notifyEnterpriseUsers(submissionId, "审批结果通知",
             "单据号 " + documentNo + " 处理结果: " + actionName + (comment == null || comment.isBlank() ? "" : "，意见: " + comment));
+        notifyEnterpriseContact(submissionId, status, actionName, comment);
         auditService.log(operator.getUserId(), "APPROVAL", actionName, String.valueOf(submissionId),
             buildAuditDetail(documentNo, actionName, comment));
         log.info("[审批] 流程处理完成，submissionId={}，documentNo={}，resultStatus={}，actionName={}，operatorId={}，comment={}",
@@ -397,6 +403,10 @@ public class ApprovalService {
         for (SysUser user : users) {
             noticeService.push(user.getId(), title, content);
         }
+    }
+
+    private void notifyEnterpriseContact(Long submissionId, SubmissionStatus status, String actionName, String comment) {
+        msgCenterService.sendApprovalResult(submissionId, status, actionName, comment);
     }
 
     private void notifyEnterpriseUsers(Long submissionId, String title, String content) {

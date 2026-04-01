@@ -26,6 +26,8 @@ public class EnterpriseProfileVO {
     private BigDecimal annualRevenue2025;
     private String contactName;
     private String contactPhone;
+    private String contactCertNo;
+    private String contactCertType;
     private String dataSource;
 
     public static EnterpriseProfileVO from(EnterpriseProfile p) {
@@ -47,6 +49,8 @@ public class EnterpriseProfileVO {
             .annualRevenue2025(p.getAnnualRevenue2025())
             .contactName(p.getContactName())
             .contactPhone(p.getContactPhone())
+            .contactCertNo(p.getContactCertNo())
+            .contactCertType(p.getContactCertType())
             .dataSource(p.getDataSource())
             .build();
     }

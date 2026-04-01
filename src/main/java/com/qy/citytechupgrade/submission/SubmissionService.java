@@ -330,13 +330,9 @@ public class SubmissionService {
 
     private SubmissionForm createDraftFromEnterprise(Long enterpriseId, Long userId) {
         EnterpriseProfile enterprise = enterpriseService.findByIdOrThrow(enterpriseId);
-        EnterpriseService.SurveyIndustryInfo surveyIndustryInfo = enterpriseService.findSurveyIndustryInfo(enterprise.getEnterpriseName());
-        String industryCode = surveyIndustryInfo != null && StringUtils.hasText(surveyIndustryInfo.industryCode())
-            ? surveyIndustryInfo.industryCode()
-            : enterprise.getIndustryCode();
-        String industryName = surveyIndustryInfo != null && StringUtils.hasText(surveyIndustryInfo.industryName())
-            ? surveyIndustryInfo.industryName()
-            : enterprise.getIndustryName();
+        EnterpriseService.SurveyIndustryInfo surveyIndustryInfo = resolveIndustryInfo(enterprise);
+        String industryCode = surveyIndustryInfo == null ? null : surveyIndustryInfo.industryCode();
+        String industryName = surveyIndustryInfo == null ? null : surveyIndustryInfo.industryName();
 
         SubmissionForm form = new SubmissionForm();
         form.setEnterpriseId(enterpriseId);
@@ -370,13 +366,9 @@ public class SubmissionService {
 
     private SubmissionDetailVO buildInitialDetailFromEnterprise(Long enterpriseId) {
         EnterpriseProfile enterprise = enterpriseService.findByIdOrThrow(enterpriseId);
-        EnterpriseService.SurveyIndustryInfo surveyIndustryInfo = enterpriseService.findSurveyIndustryInfo(enterprise.getEnterpriseName());
-        String industryCode = surveyIndustryInfo != null && StringUtils.hasText(surveyIndustryInfo.industryCode())
-            ? surveyIndustryInfo.industryCode()
-            : enterprise.getIndustryCode();
-        String industryName = surveyIndustryInfo != null && StringUtils.hasText(surveyIndustryInfo.industryName())
-            ? surveyIndustryInfo.industryName()
-            : enterprise.getIndustryName();
+        EnterpriseService.SurveyIndustryInfo surveyIndustryInfo = resolveIndustryInfo(enterprise);
+        String industryCode = surveyIndustryInfo == null ? null : surveyIndustryInfo.industryCode();
+        String industryName = surveyIndustryInfo == null ? null : surveyIndustryInfo.industryName();
         SubmissionSaveRequest.BasicInfo basic = new SubmissionSaveRequest.BasicInfo();
         basic.setEnterpriseName(enterprise.getEnterpriseName());
         basic.setCreditCode(enterprise.getCreditCode());
@@ -439,6 +431,25 @@ public class SubmissionService {
         submissionBasicInfoRepository.save(info);
     }
 
+    private EnterpriseService.SurveyIndustryInfo resolveIndustryInfo(EnterpriseProfile enterprise) {
+        String industryCode = trimToNull(enterprise.getIndustryCode());
+        String industryName = trimToNull(enterprise.getIndustryName());
+        if (StringUtils.hasText(industryCode)) {
+            if (!StringUtils.hasText(industryName)) {
+                industryName = trimToNull(enterpriseService.findIndustryNameByIndustryCode(industryCode));
+            }
+            return new EnterpriseService.SurveyIndustryInfo(industryCode, industryName);
+        }
+        EnterpriseService.SurveyIndustryInfo surveyIndustryInfo = enterpriseService.findSurveyIndustryInfo(enterprise.getEnterpriseName());
+        if (surveyIndustryInfo == null) {
+            return null;
+        }
+        return new EnterpriseService.SurveyIndustryInfo(
+            trimToNull(surveyIndustryInfo.industryCode()),
+            trimToNull(surveyIndustryInfo.industryName())
+        );
+    }
+
     private String resolveDocumentNo(SubmissionForm form) {
         if (StringUtils.hasText(form.getDocumentNo())) {
             return form.getDocumentNo();
@@ -451,6 +462,13 @@ public class SubmissionService {
     private void touchUpdatedAt(SubmissionForm form) {
         form.setUpdatedAt(LocalDateTime.now());
         submissionFormRepository.save(form);
+    }
+
+    private String trimToNull(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        return value.trim();
     }
 
     private String generateUniqueDocumentNo(String enterpriseName, Long submissionId) {

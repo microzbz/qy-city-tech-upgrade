@@ -47,3 +47,14 @@ app:
       policy-pwd: srhkbybw
       enterprise-api-name: enterprisePortrait
       sso-api-name: getUserInfoByToken
+    msg-center:
+      enabled: true
+      base-url: "${APP_MSG_CENTER_BASE_URL:http://zwfw.dg.gov.cn/api/}"
+      policy-name: "${APP_MSG_CENTER_POLICY_NAME:新型技改城市平台}"
+      policy-pwd: "${APP_MSG_CENTER_POLICY_PWD:zsetyxvp}"
+      send-api-name: msgCentreSend
+      send-result-api-name: msgCentreSendResult
+      template-id: "${APP_MSG_CENTER_TEMPLATE_ID:c0bc0e91-0582-4749-a93b-4463c0be7f74}"
+      receive-param-type: "2"
+      ext-data-type: city-tech-upgrade-approval
+      query-result-enabled: true
