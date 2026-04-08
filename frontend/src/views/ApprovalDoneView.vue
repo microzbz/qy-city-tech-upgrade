@@ -234,13 +234,20 @@ async function editSubmission(submissionId) {
 
 async function returnSubmission(submissionId) {
   try {
+    const defaultComment = '新型技改城市项目材料需要补充完善'
     const { value } = await ElMessageBox.prompt('请输入退回原因', '退回企业', {
-      inputValue: '',
-      inputPlaceholder: '请输入退回原因',
+      inputValue: defaultComment,
+      inputPlaceholder: '可直接在默认文案后补充说明',
       confirmButtonText: '确认退回',
-      cancelButtonText: '取消'
+      cancelButtonText: '取消',
+      inputValidator: (val) => {
+        const text = (val || '').trim()
+        if (!text) return '发送内容不能为空'
+        if (text.length > 200) return '发送内容不能超过200个字'
+        return true
+      }
     })
-    await http.post(`/approvals/submissions/${submissionId}/return-approved`, { comment: value })
+    await http.post(`/approvals/submissions/${submissionId}/return-approved`, { comment: value.trim() })
     ElMessage.success('已退回企业修改')
     await loadRows()
   } catch (error) {

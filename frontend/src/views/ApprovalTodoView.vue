@@ -79,6 +79,8 @@ const pager = reactive({
   total: 0
 })
 
+const COMMENT_MAX_LENGTH = 200
+
 const load = async () => {
   const res = await http.get('/approvals/todo', {
     params: {
@@ -97,9 +99,40 @@ const load = async () => {
   pager.size = data.size || pager.size
 }
 
+function getActionDialogConfig(action) {
+  if (action === 'approve') {
+    return {
+      title: '审批通过',
+      message: '请确认发送内容',
+      inputValue: '新型技改城市项目材料审核通过',
+      inputPlaceholder: '请输入发送内容',
+      confirmButtonText: '确认发送'
+    }
+  }
+  return {
+    title: action === 'reject' ? '驳回' : '退回修改',
+    message: '请补充发送内容',
+    inputValue: '新型技改城市项目材料需要补充完善',
+    inputPlaceholder: '可直接在默认文案后补充说明',
+    confirmButtonText: '确认发送'
+  }
+}
+
 const act = async (taskId, action) => {
-  const { value } = await ElMessageBox.prompt('请输入审批意见（可选）', '审批操作', { inputValue: '' })
-  await http.post(`/approvals/${taskId}/${action}`, { comment: value })
+  const dialog = getActionDialogConfig(action)
+  const { value } = await ElMessageBox.prompt(dialog.message, dialog.title, {
+    inputValue: dialog.inputValue,
+    inputPlaceholder: dialog.inputPlaceholder,
+    confirmButtonText: dialog.confirmButtonText,
+    cancelButtonText: '取消',
+    inputValidator: (val) => {
+      const text = (val || '').trim()
+      if (!text) return '发送内容不能为空'
+      if (text.length > COMMENT_MAX_LENGTH) return `发送内容不能超过${COMMENT_MAX_LENGTH}个字`
+      return true
+    }
+  })
+  await http.post(`/approvals/${taskId}/${action}`, { comment: value.trim() })
   await load()
 }
 

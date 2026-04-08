@@ -136,9 +136,23 @@ public class MsgCenterService {
                                               String comment,
                                               String receiveParam) {
         String messageContent = buildMessageContent(form, basic, submissionId, actionName, comment);
+        String messageTitle = buildMessageTitle(actionName);
+        String sendDate = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
         Map<String, Object> data = new HashMap<>();
         data.put("msg", messageContent);
+        data.put("msg_title", messageTitle);
+        data.put("msgtitle", messageTitle);
+        data.put("msg_sendDate", sendDate);
+        data.put("msgsendDate", sendDate);
+        data.put("msgsenddate", sendDate);
         return data;
+    }
+
+    private String buildMessageTitle(String actionName) {
+        if (StringUtils.hasText(actionName)) {
+            return "技改城市业务处理意见：" + actionName.trim();
+        }
+        return "技改城市业务处理意见";
     }
 
     private String buildMessageContent(SubmissionForm form,
@@ -147,9 +161,15 @@ public class MsgCenterService {
                                        String actionName,
                                        String comment) {
         String documentNo = resolveDocumentNo(form, basic, submissionId);
-        StringBuilder text = new StringBuilder("单据号 ").append(documentNo).append(" 处理结果: ").append(actionName);
+        StringBuilder text = new StringBuilder()
+            .append("您好，您提交的新型技改城市项目材料处理结果已更新。")
+            .append("\n")
+            .append("\n")
+            .append("单据号：").append(documentNo)
+            .append("\n")
+            .append("处理结果：").append(actionName);
         if (StringUtils.hasText(comment)) {
-            text.append("，意见: ").append(comment.trim());
+            text.append("\n").append("处理意见：").append(comment.trim());
         }
         return text.toString();
     }
