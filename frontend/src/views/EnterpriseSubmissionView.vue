@@ -239,9 +239,10 @@
         <div class="action-bar">
           <div class="action-buttons">
             <el-button @click="cancelAdminEdit">取消编辑</el-button>
-            <el-button v-if="showAdminSaveButton" class="save-btn" :loading="saving" @click="save">保存修改</el-button>
+            <el-button v-if="showAdminSaveButton" class="save-btn" :loading="saving" @click="save">保存修改（不发消息）</el-button>
             <el-button class="submit-btn" :loading="submitting" @click="submit">提交修改</el-button>
           </div>
+          <div class="admin-edit-hint">管理员编辑说明：仅“提交修改”会发送审批结果消息并通知企业。</div>
           <el-tag class="status-chip" :type="statusTagType">当前状态：{{ statusLabel }}</el-tag>
         </div>
       </el-form-item>
@@ -1018,7 +1019,11 @@ const save = async () => {
       ? await http.post(`/approvals/submissions/${submissionId.value}/save-edit`, payload)
       : await http.post('/submissions/save', payload)
     await fillForm(res.data)
-    ElMessage.success(isApproverUser.value && adminEditMode.value ? '修改已保存' : '保存成功')
+    ElMessage.success(
+      isApproverUser.value && adminEditMode.value
+        ? '修改已保存，尚未发送消息；如需通知企业，请点击“提交修改”'
+        : '保存成功'
+    )
     return true
   } catch (e) {
     return false
@@ -1524,6 +1529,15 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 14px;
+}
+
+.admin-edit-hint {
+  font-size: 13px;
+  color: #8a5a12;
+  background: #fff7e8;
+  border: 1px solid #f1d3a2;
+  padding: 8px 10px;
+  line-height: 1.5;
 }
 
 .approval-section-card {

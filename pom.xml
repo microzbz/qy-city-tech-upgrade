@@ -56,16 +56,9 @@
         </dependency>
 
         <dependency>
-            <groupId>com.dameng</groupId>
-            <artifactId>DmJdbcDriver18</artifactId>
-            <version>8.1.1.193</version>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
             <scope>runtime</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>com.dameng</groupId>
-            <artifactId>DmDialect-for-hibernate6.6</artifactId>
-            <version>8.1.4.93</version>
         </dependency>
 
         <dependency>
@@ -140,12 +133,18 @@
 
     <profiles>
         <profile>
-            <id>mysql-migration</id>
+            <id>dm8-migration</id>
             <dependencies>
                 <dependency>
-                    <groupId>com.mysql</groupId>
-                    <artifactId>mysql-connector-j</artifactId>
+                    <groupId>com.dameng</groupId>
+                    <artifactId>DmJdbcDriver18</artifactId>
+                    <version>8.1.1.193</version>
                     <scope>runtime</scope>
+                </dependency>
+                <dependency>
+                    <groupId>com.dameng</groupId>
+                    <artifactId>DmDialect-for-hibernate6.6</artifactId>
+                    <version>8.1.4.93</version>
                 </dependency>
             </dependencies>
         </profile>

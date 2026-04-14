@@ -81,7 +81,9 @@ public class QfClientService {
 
         String token = getToken(baseUrl, policyName, policyPwd);
         log.info("[单点登录][企服] 已获取平台 token，token={}", token);
-        String desRaw = callAccess(baseUrl, token, apiName, "token=" + code, policyPwd);
+        String rawData = "token=" + code;
+        log.info("[单点登录][企服] 使用参数 token 调用 SSO 接口，rawData={}", rawData);
+        String desRaw = callAccess(baseUrl, token, apiName, rawData, policyPwd);
         log.info("[单点登录][企服] access 接口 DES 解密后报文长度={}，内容={}", desRaw.length(), desRaw);
         String sm4CipherText = extractSsoCipherText(desRaw);
         log.info("[单点登录][企服] 已提取 SM4 密文，长度={}，内容={}", sm4CipherText.length(), sm4CipherText);
@@ -94,7 +96,7 @@ public class QfClientService {
             log.warn("[单点登录][企服] 解析后的用户信息无效，字段={}", userMap.keySet());
             throw new BizException("没有获取到有效的用户信息");
         }
-        log.info("[单点登录][企服] 解析后的用户字段={}", userMap.keySet());
+        log.info("[单点登录][企服] 使用参数 token 获取用户成功，字段={}", userMap.keySet());
         return userMap;
     }
 
@@ -198,18 +200,26 @@ public class QfClientService {
 
     private String decryptSm4(String cipherText, String key16) {
         try {
-            String raw = SM4Utils.decryptData_ECB(cipherText, key16);
-            log.info("[单点登录][企服] SM4 ECB 解密成功");
-            return raw;
-        } catch (Exception e) {
-            try {
-                String raw = SM4Utils.decryptData_CBC(cipherText, key16, key16);
-                log.info("[单点登录][企服] SM4 CBC 解密成功");
-                return raw;
-            } catch (Exception ex) {
-                throw new BizException("SM4解密用户信息失败");
+            String raw = SM4Utils.decryptData_CBC(cipherText, key16, key16);
+            if (!looksLikeJson(raw)) {
+                throw new BizException("SM4 CBC 解密结果不是有效 JSON");
             }
+            log.info("[单点登录][企服] SM4 CBC 解密成功，结果为 JSON");
+            return raw;
+        } catch (BizException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("[单点登录][企服] SM4 CBC 解密失败，message={}", e.getMessage());
+            throw new BizException("SM4解密用户信息失败");
         }
+    }
+
+    private boolean looksLikeJson(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return false;
+        }
+        String trimmed = raw.trim();
+        return trimmed.startsWith("{") || trimmed.startsWith("[");
     }
 
     private String extractSsoCipherText(String desRaw) {

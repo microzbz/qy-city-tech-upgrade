@@ -194,12 +194,14 @@ public class ApprovalService {
         submissionService.updateReviewNode(submissionId, SubmissionStatus.APPROVED, null, null);
         SubmissionForm refreshed = submissionService.getByIdOrThrow(submissionId);
         String documentNo = resolveDocumentNo(refreshed, submissionId);
+        String msgCenterActionName = "审批通过";
+        String msgCenterComment = "管理员已修改材料并确认通过";
         notifyEnterpriseUsers(submissionId, "审批结果通知", "单据号 " + documentNo + " 已由管理员修改后确认通过");
-        notifyEnterpriseContact(submissionId, SubmissionStatus.APPROVED, "管理员修改后确认通过", null);
+        notifyEnterpriseContact(submissionId, SubmissionStatus.APPROVED, msgCenterActionName, msgCenterComment);
         auditService.log(operator.getUserId(), "APPROVAL", "ADMIN_EDIT_APPROVE", String.valueOf(submissionId),
             "管理员修改后提交并确认通过，单据号: " + documentNo);
-        log.info("[审批] 管理员提交修改后的单据成功，submissionId={}，documentNo={}，operatorId={}",
-            submissionId, documentNo, operator.getUserId());
+        log.info("[审批] 管理员提交修改后的单据成功，submissionId={}，documentNo={}，operatorId={}，msgCenterActionName={}，msgCenterComment={}",
+            submissionId, documentNo, operator.getUserId(), msgCenterActionName, msgCenterComment);
         return submissionService.detail(refreshed, operator);
     }
 

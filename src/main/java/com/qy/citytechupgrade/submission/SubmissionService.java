@@ -132,7 +132,7 @@ public class SubmissionService {
             String.valueOf(form.getId()),
             "管理员保存修改，单据号: " + resolveDocumentNo(form)
         );
-        log.info("[填报] 管理员保存修改成功，operatorId={}，submissionId={}，documentNo={}，status={}，updatedAt={}",
+        log.info("[填报] 管理员保存修改成功，operatorId={}，submissionId={}，documentNo={}，status={}，updatedAt={}，notificationTriggered=false",
             currentUser.getUserId(), form.getId(), resolveDocumentNo(form), form.getStatus(), form.getUpdatedAt());
         return detail(form, currentUser);
     }

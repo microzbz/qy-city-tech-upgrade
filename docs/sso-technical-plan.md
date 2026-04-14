@@ -21,7 +21,7 @@
    2. 调企服平台 `/access`：
       - `token = platformToken`
       - `apiName = getUserInfoByToken`
-      - `data = DES("tokenCode={ecspcode}")`
+      - `data = DES("token={ecspcode}")`
    3. 先对 `/access` 返回 `data` 做 DES 解密，得到密文用户串。
    4. 取 `ecspcode` 前 16 位作为 SM4 密钥，对用户串做 SM4 解密（使用 `src/main/java/com/qy/citytechupgrade/utils/SM4Utils.java`）。
    5. 解析 SM4 解密后的 JSON，得到统一登录用户信息。
@@ -74,11 +74,11 @@
 - `/access`：
   - `token` 必须是 `/token` 返回的平台访问令牌。
   - `apiName = getUserInfoByToken`
-  - `data` 为 DES/ECB/PKCS5Padding 加密的参数串：`tokenCode={ecspcode}`
+  - `data` 为 DES/ECB/PKCS5Padding 加密的参数串：`token={ecspcode}`
 - `/access` 返回 `data` 处理顺序：
   1. DES 解密得到中间字符串；
   2. 取 `ecspcode.substring(0,16)` 作为 SM4 Key；
-  3. 调用 `SM4Utils.decryptData_ECB(...)`（如对方联调要求 CBC，再切换 `decryptData_CBC(...)`）；
+  3. 调用 `SM4Utils.decryptData_CBC(...)`，并使用 `ecspcode.substring(0,16)` 同时作为 Key 和 IV；
   4. 对 SM4 解密结果做 JSON 解析。
 
 ## 6. 数据同步策略（幂等）
