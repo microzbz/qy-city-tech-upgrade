@@ -130,7 +130,7 @@ public class AuthService {
                 existingUser.setEnterpriseId(enterprise.getId());
                 changed = true;
             }
-            String displayName = firstNonBlank(readString(userInfo, "cn"), readString(userInfo, "linkPersonName"), username);
+            String displayName = resolveSsoDisplayName(userInfo, username);
             String limitedDisplayName = limit(displayName, 128);
             if (!Objects.equals(existingUser.getDisplayName(), limitedDisplayName)) {
                 existingUser.setDisplayName(limitedDisplayName);
@@ -144,7 +144,7 @@ public class AuthService {
             return existingUser;
         }
 
-        String displayName = firstNonBlank(readString(userInfo, "cn"), readString(userInfo, "linkPersonName"), username);
+        String displayName = resolveSsoDisplayName(userInfo, username);
 
         SysUser user = new SysUser();
         boolean isNew = true;
@@ -156,6 +156,16 @@ public class AuthService {
         log.info("[单点登录] 准备保存用户，username={}，displayName={}，enterpriseId={}，isNew={}",
             username, displayName, enterprise == null ? null : enterprise.getId(), isNew);
         return userService.save(user);
+    }
+
+    private String resolveSsoDisplayName(Map<String, Object> userInfo, String fallbackUsername) {
+        Map<String, Object> enterpriseInfo = resolveEnterpriseInfo(userInfo);
+        return firstNonBlank(
+            readString(enterpriseInfo, "cn"),
+            readString(userInfo, "cn"),
+            readString(userInfo, "linkPersonName"),
+            fallbackUsername
+        );
     }
 
     private EnterpriseProfile createOrSyncSsoEnterprise(Map<String, Object> userInfo, String externalId) {
@@ -201,42 +211,81 @@ public class AuthService {
     private void syncEnterpriseFieldsFromSso(EnterpriseProfile enterprise,
                                              Map<String, Object> enterpriseInfo,
                                              Map<String, Object> userInfo) {
+        boolean personalBindingEnterprise = isPersonalBindingEnterprise(userInfo);
         String legalPerson = firstNonBlank(readString(enterpriseInfo, "legalPerson"), readString(userInfo, "legalPerson"));
         if (StringUtils.hasText(legalPerson)) {
             enterprise.setLegalPerson(limit(legalPerson, 128));
         }
-        String contactName = firstNonBlank(
-            readString(enterpriseInfo, "linkPersonName"),
-            readString(userInfo, "linkPersonName"),
-            readString(enterpriseInfo, "contactName")
-        );
+        String contactName = personalBindingEnterprise
+            ? firstNonBlank(
+                readString(userInfo, "cn"),
+                readString(userInfo, "linkPersonName"),
+                readString(enterpriseInfo, "linkPersonName"),
+                readString(enterpriseInfo, "contactName")
+            )
+            : firstNonBlank(
+                readString(enterpriseInfo, "linkPersonName"),
+                readString(userInfo, "linkPersonName"),
+                readString(enterpriseInfo, "contactName"),
+                readString(userInfo, "cn")
+            );
         if (StringUtils.hasText(contactName)) {
             enterprise.setContactName(limit(contactName, 128));
         }
-        String contactPhone = firstNonBlank(
-            readString(enterpriseInfo, "telPhone"),
-            readString(userInfo, "telPhone"),
-            readString(enterpriseInfo, "contactPhone")
-        );
+        String contactPhone = personalBindingEnterprise
+            ? firstNonBlank(
+                readString(userInfo, "telPhone"),
+                readString(enterpriseInfo, "telPhone"),
+                readString(enterpriseInfo, "contactPhone")
+            )
+            : firstNonBlank(
+                readString(enterpriseInfo, "telPhone"),
+                readString(userInfo, "telPhone"),
+                readString(enterpriseInfo, "contactPhone")
+            );
         if (StringUtils.hasText(contactPhone)) {
             enterprise.setContactPhone(limit(contactPhone, 64));
         }
-        String contactCertNo = firstNonBlank(
-            readString(enterpriseInfo, "linkPersonCode"),
-            readString(userInfo, "linkPersonCode"),
-            readString(enterpriseInfo, "contactCertNo")
-        );
+        String contactCertNo = personalBindingEnterprise
+            ? firstNonBlank(
+                readString(userInfo, "idcardnumber"),
+                readString(userInfo, "linkPersonCode"),
+                readString(enterpriseInfo, "linkPersonCode"),
+                readString(enterpriseInfo, "contactCertNo")
+            )
+            : firstNonBlank(
+                readString(enterpriseInfo, "linkPersonCode"),
+                readString(userInfo, "linkPersonCode"),
+                readString(userInfo, "idcardnumber"),
+                readString(enterpriseInfo, "contactCertNo")
+            );
         if (StringUtils.hasText(contactCertNo)) {
             enterprise.setContactCertNo(limit(contactCertNo, 64));
         }
-        String contactCertType = firstNonBlank(
-            readString(enterpriseInfo, "linkPersonType"),
-            readString(userInfo, "linkPersonType"),
-            readString(enterpriseInfo, "contactCertType")
-        );
+        String contactCertType = personalBindingEnterprise
+            ? firstNonBlank(
+                readString(userInfo, "idcardtype"),
+                readString(userInfo, "linkPersonType"),
+                readString(enterpriseInfo, "linkPersonType"),
+                readString(enterpriseInfo, "contactCertType")
+            )
+            : firstNonBlank(
+                readString(enterpriseInfo, "linkPersonType"),
+                readString(userInfo, "linkPersonType"),
+                readString(userInfo, "idcardtype"),
+                readString(enterpriseInfo, "contactCertType")
+            );
         if (StringUtils.hasText(contactCertType)) {
             enterprise.setContactCertType(limit(contactCertType, 32));
         }
+    }
+
+    private boolean isPersonalBindingEnterprise(Map<String, Object> userInfo) {
+        if ("2".equals(readString(userInfo, "usertype"))) {
+            return false;
+        }
+        Object parUserInfo = userInfo.get("parUserInfo");
+        return !parseObjectMap(parUserInfo).isEmpty();
     }
 
     private String resolveCreditCode(Map<String, Object> enterpriseInfo, Map<String, Object> userInfo, String externalId) {
