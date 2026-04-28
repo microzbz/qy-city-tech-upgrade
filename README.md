@@ -77,9 +77,16 @@ app.external.qf.base-url=你的企服接口地址
 app.external.qf.policy-name=你的账号
 app.external.qf.policy-pwd=你的密码
 app.external.qf.enterprise-api-name=enterprisePortrait
+app.external.qf.sso-api-name=getUserInfoByToken
+app.external.qf.system-msg-enabled=false
+app.external.qf.system-msg-api-name=sendSystemMsg
+app.external.qf.system-msg-biz-type=请向企服平台申请
+app.external.qf.system-msg-dept-code=业务部门社统码
+app.external.qf.system-msg-dept-name=业务部门名称
+app.external.qf.system-msg-link=
 ```
 
-> 当前项目已实现 token + DES 加密调用流程；具体 `enterprise-api-name` 需要按你联调接口名确认。
+> 当前项目已实现 token + DES 加密调用流程；`system-msg-enabled=true` 后，审批结果外发时会在原通知链路之外，顺带调用企服平台 `sendSystemMsg` 推一份站内信。
 
 ### 附件存储目录配置
 

@@ -99,6 +99,9 @@ public class MockQfController {
             if ("msgCentreSendResult".equals(apiName)) {
                 return success(cryptoUtils.desEncrypt(objectMapper.writeValueAsString(buildMockMsgSendQueryResult(rawData)), policyPwd));
             }
+            if ("sendSystemMsg".equals(apiName)) {
+                return success(cryptoUtils.desEncrypt(objectMapper.writeValueAsString(buildMockSystemMsgResult(rawData)), policyPwd));
+            }
             return fail("mock不支持接口: " + apiName);
         } catch (Exception e) {
             return fail("mock生成返回数据失败: " + e.getMessage());
@@ -182,6 +185,21 @@ public class MockQfController {
         resp.put("code", 1);
         resp.put("msg", "操作成功");
         resp.put("message", "操作成功");
+        resp.put("data", data);
+        return resp;
+    }
+
+    private Map<String, Object> buildMockSystemMsgResult(String rawData) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("messageId", UUID.randomUUID().toString());
+        data.put("msgTitle", parseParam(rawData, "msgTitle"));
+        data.put("bizType", parseParam(rawData, "bizType"));
+        data.put("bizNo", parseParam(rawData, "bizNo"));
+        data.put("associationList", parseParam(rawData, "associationList"));
+
+        Map<String, Object> resp = new HashMap<>();
+        resp.put("code", 1);
+        resp.put("msg", "操作成功");
         resp.put("data", data);
         return resp;
     }

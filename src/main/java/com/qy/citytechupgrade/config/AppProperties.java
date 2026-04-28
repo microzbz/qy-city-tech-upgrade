@@ -38,6 +38,12 @@ public class AppProperties {
             private String policyPwd;
             private String enterpriseApiName = "enterprisePortrait";
             private String ssoApiName = "getUserInfoByToken";
+            private boolean systemMsgEnabled = false;
+            private String systemMsgApiName = "sendSystemMsg";
+            private String systemMsgBizType;
+            private String systemMsgDeptCode;
+            private String systemMsgDeptName;
+            private String systemMsgLink;
         }
 
         @Data

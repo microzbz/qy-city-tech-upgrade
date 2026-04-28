@@ -44,6 +44,12 @@ app:
       policy-pwd: srhkbybw
       enterprise-api-name: enterprisePortrait
       sso-api-name: getUserInfoByToken
+      system-msg-enabled: "${APP_QF_SYSTEM_MSG_ENABLED:true}"
+      system-msg-api-name: sendSystemMsg
+      system-msg-biz-type: "${APP_QF_SYSTEM_MSG_BIZ_TYPE:}"
+      system-msg-dept-code: "${APP_QF_SYSTEM_MSG_DEPT_CODE:}"
+      system-msg-dept-name: "${APP_QF_SYSTEM_MSG_DEPT_NAME:}"
+      system-msg-link: "${APP_QF_SYSTEM_MSG_LINK:}"
     msg-center:
       enabled: true
       base-url: "${APP_MSG_CENTER_BASE_URL:http://zwfw.dg.gov.cn/api/}"

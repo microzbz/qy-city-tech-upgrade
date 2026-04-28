@@ -16,10 +16,14 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -34,6 +38,55 @@ public class QfClientService {
 
     private String cachedToken;
     private LocalDateTime tokenExpireAt;
+
+    public void sendSystemMsg(SystemMsgRequest request) {
+        if (!appProperties.getExternal().getQf().isEnabled()) {
+            throw new BizException("企服平台接口未启用");
+        }
+        AppProperties.External.Qf config = appProperties.getExternal().getQf();
+        String baseUrl = require(config.getBaseUrl(), "app.external.qf.base-url 未配置");
+        String policyName = require(config.getPolicyName(), "app.external.qf.policy-name 未配置");
+        String policyPwd = require(config.getPolicyPwd(), "app.external.qf.policy-pwd 未配置");
+        String apiName = require(config.getSystemMsgApiName(), "app.external.qf.system-msg-api-name 未配置");
+
+        String msgTitle = trimToNull(request.msgTitle());
+        String msgContent = trimToNull(request.msgContent());
+        String bizType = defaultIfBlank(request.bizType(), config.getSystemMsgBizType());
+        if (!StringUtils.hasText(msgTitle)) {
+            throw new BizException("企服站内信标题不能为空");
+        }
+        if (!StringUtils.hasText(msgContent)) {
+            throw new BizException("企服站内信内容不能为空");
+        }
+
+        List<SystemMsgAssociation> associationList = request.associationList() == null ? List.of() : request.associationList().stream()
+            .filter(item -> StringUtils.hasText(item.connectId()) && StringUtils.hasText(item.connectName()))
+            .map(item -> new SystemMsgAssociation(item.connectId().trim(), item.connectName().trim()))
+            .toList();
+
+        Map<String, String> params = new LinkedHashMap<>();
+        params.put("encode_msgTitle", urlEncode(truncate(msgTitle, 20)));
+        params.put("msgLink", trimToEmpty(request.msgLink()));
+        params.put("encode_msgContent", urlEncode(msgContent));
+        params.put("deptcode", trimToEmpty(request.deptCode()));
+        params.put("deptname", trimToEmpty(request.deptName()));
+        params.put("bizType", trimToEmpty(bizType));
+        params.put("bizNo", trimToEmpty(request.bizNo()));
+        params.put("jsonBody_associationList", toJson(associationList));
+        log.info("[企服站内信] 开始发送，apiName={}，bizType={}，bizNo={}，associationList={}",
+            apiName, bizType, params.get("bizNo"), params.get("jsonBody_associationList"));
+        log.info("[企服站内信] 详细参数，encode_msgTitle={}，msgLink={}，encode_msgContent={}，deptcode={}，deptname={}，bizType={}，bizNo={}，jsonBody_associationList={}",
+            params.get("encode_msgTitle"), params.get("msgLink"), params.get("encode_msgContent"), params.get("deptcode"),
+            params.get("deptname"), params.get("bizType"), params.get("bizNo"), params.get("jsonBody_associationList"));
+
+        String token = getToken(baseUrl, policyName, policyPwd);
+        String raw = callAccess(baseUrl, token, apiName, params, policyPwd);
+        Map<String, Object> result = parseObjectMap(raw, "解析企服站内信响应失败");
+        if (!Integer.valueOf(1).equals(parseCode(result))) {
+            throw new BizException("企服站内信发送失败: " + extractErrorMessage(result, raw));
+        }
+        log.info("[企服站内信] 发送完成，bizType={}，bizNo={}，result={}", bizType, params.get("bizNo"), result);
+    }
 
     public EnterpriseProfile fetchEnterpriseProfile(String creditCode) {
         if (!appProperties.getExternal().getQf().isEnabled()) {
@@ -148,6 +201,14 @@ public class QfClientService {
         return decrypted;
     }
 
+    private String callAccess(String baseUrl,
+                              String token,
+                              String apiName,
+                              Map<String, String> rawParams,
+                              String policyPwd) {
+        return callAccess(baseUrl, token, apiName, buildRawData(rawParams, true), policyPwd);
+    }
+
     private Map<String, Object> postForm(String url, MultiValueMap<String, String> form) {
         org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
@@ -175,6 +236,47 @@ public class QfClientService {
             return -1;
         }
         return Integer.parseInt(String.valueOf(code));
+    }
+
+    private String buildRawData(Map<String, String> params, boolean skipBlank) {
+        List<String> pairs = new ArrayList<>();
+        params.forEach((key, value) -> {
+            if (value == null) {
+                return;
+            }
+            String actualValue = value.trim();
+            if (skipBlank && !StringUtils.hasText(actualValue)) {
+                return;
+            }
+            if (key.startsWith("encode_") || key.startsWith("jsonBody_")) {
+                pairs.add(key + "=" + actualValue);
+            } else if (shouldEncode(key)) {
+                pairs.add("encode_" + key + "=" + URLEncoder.encode(actualValue, StandardCharsets.UTF_8));
+            } else {
+                pairs.add(key + "=" + actualValue);
+            }
+        });
+        return String.join("&", pairs);
+    }
+
+    private boolean shouldEncode(String key) {
+        return "msgLink".equals(key)
+            || "deptname".equals(key)
+            || "associationList".equals(key);
+    }
+
+    private String extractErrorMessage(Map<String, Object> result, String raw) {
+        Object msg = result.get("msg");
+        if (msg != null && StringUtils.hasText(String.valueOf(msg))) {
+            return String.valueOf(msg);
+        }
+        Object error = result.get("error");
+        Object status = result.get("status");
+        Object path = result.get("path");
+        if (error != null || status != null || path != null) {
+            return "status=" + status + ", error=" + error + ", path=" + path;
+        }
+        return raw;
     }
 
     @SuppressWarnings("unchecked")
@@ -321,11 +423,61 @@ public class QfClientService {
         }
     }
 
+    private String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            throw new BizException("企服站内信请求报文序列化失败");
+        }
+    }
+
+    private String truncate(String value, int maxLength) {
+        String trimmed = value.trim();
+        if (trimmed.length() <= maxLength) {
+            return trimmed;
+        }
+        return trimmed.substring(0, maxLength);
+    }
+
+    private String trimToNull(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private String defaultIfBlank(String value, String defaultValue) {
+        return StringUtils.hasText(value) ? value.trim() : trimToNull(defaultValue);
+    }
+
+    private String trimToEmpty(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private String urlEncode(String value) {
+        return URLEncoder.encode(value == null ? "" : value.trim(), StandardCharsets.UTF_8);
+    }
+
     private String require(String val, String msg) {
         if (!StringUtils.hasText(val)) {
             throw new BizException(msg);
         }
         return val.trim();
+    }
+
+    public record SystemMsgRequest(
+        String msgTitle,
+        String msgLink,
+        String msgContent,
+        String deptCode,
+        String deptName,
+        String bizType,
+        String bizNo,
+        List<SystemMsgAssociation> associationList
+    ) {
+    }
+
+    public record SystemMsgAssociation(
+        String connectId,
+        String connectName
+    ) {
     }
 
 }
