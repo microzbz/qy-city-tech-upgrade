@@ -225,7 +225,7 @@ public class IndustryService {
     }
 
     private String normalizeSpecialProcessNamesText(String raw) {
-        List<String> parts = splitBySeparators(raw, "[、,，;；]+");
+        List<String> parts = splitBySeparatorsOutsideBrackets(raw, "、,，;；");
         if (parts.isEmpty()) {
             throw new BizException("主要工序不能为空");
         }
@@ -301,7 +301,54 @@ public class IndustryService {
     }
 
     private List<String> splitSpecialProcesses(String raw) {
-        return splitBySeparators(raw, "[、,，;；]+");
+        return splitBySeparatorsOutsideBrackets(raw, "、,，;；");
+    }
+
+    private List<String> splitBySeparatorsOutsideBrackets(String raw, String separators) {
+        if (!StringUtils.hasText(raw)) {
+            return List.of();
+        }
+        Set<String> out = new LinkedHashSet<>();
+        StringBuilder current = new StringBuilder();
+        int bracketDepth = 0;
+        String normalized = raw.trim();
+        for (int i = 0; i < normalized.length(); i++) {
+            char ch = normalized.charAt(i);
+            if (isOpeningBracket(ch)) {
+                bracketDepth++;
+                current.append(ch);
+                continue;
+            }
+            if (isClosingBracket(ch)) {
+                bracketDepth = Math.max(0, bracketDepth - 1);
+                current.append(ch);
+                continue;
+            }
+            boolean isSeparator = separators.indexOf(ch) >= 0 || ch == '\n' || ch == '\r';
+            if (isSeparator && bracketDepth == 0) {
+                addNormalizedPart(out, current);
+                current.setLength(0);
+                continue;
+            }
+            current.append(ch);
+        }
+        addNormalizedPart(out, current);
+        return new ArrayList<>(out);
+    }
+
+    private void addNormalizedPart(Set<String> out, StringBuilder part) {
+        String normalizedItem = normalizeText(part.toString());
+        if (StringUtils.hasText(normalizedItem)) {
+            out.add(normalizedItem);
+        }
+    }
+
+    private boolean isOpeningBracket(char ch) {
+        return ch == '(' || ch == '（' || ch == '[' || ch == '【' || ch == '{' || ch == '《';
+    }
+
+    private boolean isClosingBracket(char ch) {
+        return ch == ')' || ch == '）' || ch == ']' || ch == '】' || ch == '}' || ch == '》';
     }
 
     private String normalizeRequired(String value, String message) {
