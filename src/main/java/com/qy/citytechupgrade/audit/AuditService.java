@@ -1,6 +1,8 @@
 package com.qy.citytechupgrade.audit;
 
+import com.qy.citytechupgrade.approval.ApprovalDataScopeService;
 import com.qy.citytechupgrade.common.dto.PagedResult;
+import com.qy.citytechupgrade.common.security.CurrentUser;
 import com.qy.citytechupgrade.enterprise.EnterpriseProfile;
 import com.qy.citytechupgrade.enterprise.EnterpriseProfileRepository;
 import com.qy.citytechupgrade.submission.SubmissionForm;
@@ -39,6 +41,7 @@ public class AuditService {
     private final SysUserRoleRepository sysUserRoleRepository;
     private final SubmissionFormRepository submissionFormRepository;
     private final EnterpriseProfileRepository enterpriseProfileRepository;
+    private final ApprovalDataScopeService approvalDataScopeService;
 
     public void log(Long userId, String module, String action, String businessId, String detail) {
         AuditLog audit = new AuditLog();
@@ -56,17 +59,36 @@ public class AuditService {
         LocalDateTime startTime,
         LocalDateTime endTime,
         Integer page,
-        Integer size
+        Integer size,
+        CurrentUser currentUser
     ) {
         String normalizedDocumentNo = normalizeKeyword(documentNo);
         String normalizedCompanyName = normalizeKeyword(companyName);
         Set<Long> hiddenUserIds = hiddenRoleUserIds();
         Pageable pageable = buildPageable(page, size);
-        Page<AuditLog> result = auditLogRepository.findAll(
-            buildSpecification(normalizedDocumentNo, normalizedCompanyName, startTime, endTime, hiddenUserIds),
-            pageable
-        );
-        List<AuditLog> logs = result.getContent();
+        Specification<AuditLog> spec = buildSpecification(normalizedDocumentNo, normalizedCompanyName, startTime, endTime, hiddenUserIds);
+        List<AuditLog> logs;
+        long total;
+        int safePage = page == null || page < 1 ? 1 : page;
+        int safeSize = size == null || size < 1 ? 20 : Math.min(size, 100);
+        if (isSysAdmin(currentUser)) {
+            Page<AuditLog> result = auditLogRepository.findAll(spec, pageable);
+            logs = result.getContent();
+            total = result.getTotalElements();
+            safePage = result.getNumber() + 1;
+            safeSize = result.getSize();
+        } else {
+            List<AuditLog> scopedLogs = auditLogRepository.findAll(
+                    spec,
+                    Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"))
+                ).stream()
+                .filter(log -> canCurrentUserSeeAuditLog(log, currentUser))
+                .toList();
+            total = scopedLogs.size();
+            int fromIndex = Math.min((safePage - 1) * safeSize, scopedLogs.size());
+            int toIndex = Math.min(fromIndex + safeSize, scopedLogs.size());
+            logs = scopedLogs.subList(fromIndex, toIndex);
+        }
         Map<Long, SubmissionForm> submissionMap = findSubmissionMap(logs);
         Map<Long, EnterpriseProfile> enterpriseMap = findEnterpriseMap(submissionMap.values());
         Map<Long, String> userNameMap = sysUserRepository.findAllById(
@@ -87,7 +109,17 @@ public class AuditService {
             .createdAt(log.getCreatedAt())
             .build()
         ).toList();
-        return PagedResult.of(records, result.getTotalElements(), result.getNumber() + 1, result.getSize());
+        return PagedResult.of(records, total, safePage, safeSize);
+    }
+
+    private boolean canCurrentUserSeeAuditLog(AuditLog log, CurrentUser currentUser) {
+        return parseLong(log.getBusinessId())
+            .map(submissionId -> approvalDataScopeService.canAccessSubmission(submissionId, currentUser))
+            .orElse(false);
+    }
+
+    private boolean isSysAdmin(CurrentUser currentUser) {
+        return currentUser != null && currentUser.getRoles() != null && currentUser.getRoles().contains(HIDDEN_ROLE_CODE);
     }
 
     private Set<Long> hiddenRoleUserIds() {

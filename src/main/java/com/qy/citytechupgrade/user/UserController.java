@@ -19,14 +19,14 @@ public class UserController {
     private final AuditService auditService;
 
     @GetMapping("/users")
-    @PreAuthorize("hasAnyRole('SYS_ADMIN','APPROVER_ADMIN')")
+    @PreAuthorize("hasRole('SYS_ADMIN')")
     public ApiResponse<PagedResult<UserVO>> listUsers(@RequestParam(defaultValue = "1") Integer page,
                                                       @RequestParam(defaultValue = "20") Integer size) {
         return ApiResponse.success(userService.listUsers(page, size));
     }
 
     @PostMapping("/users")
-    @PreAuthorize("hasAnyRole('SYS_ADMIN','APPROVER_ADMIN')")
+    @PreAuthorize("hasRole('SYS_ADMIN')")
     public ApiResponse<UserVO> createUser(@RequestBody @Valid CreateUserRequest request) {
         UserVO created = userService.createUser(request);
         auditService.log(SecurityUtils.currentUserId(), "USER", "CREATE_USER",
@@ -35,7 +35,7 @@ public class UserController {
     }
 
     @PutMapping("/users/{id}")
-    @PreAuthorize("hasAnyRole('SYS_ADMIN','APPROVER_ADMIN')")
+    @PreAuthorize("hasRole('SYS_ADMIN')")
     public ApiResponse<UserVO> updateUser(@PathVariable Long id, @RequestBody @Valid UpdateUserRequest request) {
         UserVO updated = userService.updateUser(id, request);
         auditService.log(SecurityUtils.currentUserId(), "USER", "UPDATE_USER",
@@ -44,7 +44,7 @@ public class UserController {
     }
 
     @PutMapping("/users/{id}/roles")
-    @PreAuthorize("hasAnyRole('SYS_ADMIN','APPROVER_ADMIN')")
+    @PreAuthorize("hasRole('SYS_ADMIN')")
     public ApiResponse<String> assignRoles(@PathVariable Long id, @RequestBody AssignRoleRequest request) {
         userService.assignRoles(id, request.getRoleCodes());
         auditService.log(SecurityUtils.currentUserId(), "USER", "ASSIGN_ROLE", String.valueOf(id),
@@ -53,7 +53,7 @@ public class UserController {
     }
 
     @GetMapping("/roles")
-    @PreAuthorize("hasAnyRole('SYS_ADMIN','APPROVER_ADMIN')")
+    @PreAuthorize("hasRole('SYS_ADMIN')")
     public ApiResponse<List<SysRole>> listRoles() {
         return ApiResponse.success(userService.listRoles());
     }

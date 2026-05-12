@@ -1,6 +1,7 @@
 package com.qy.citytechupgrade.submission;
 
 import com.qy.citytechupgrade.audit.AuditService;
+import com.qy.citytechupgrade.approval.ApprovalDataScopeService;
 import com.qy.citytechupgrade.common.enums.TaskAction;
 import com.qy.citytechupgrade.common.enums.TaskStatus;
 import com.qy.citytechupgrade.common.enums.SubmissionStatus;
@@ -39,6 +40,7 @@ public class SubmissionService {
     private static final String ATTACHMENT_DIGITAL = "DIGITAL_PROOF";
     private static final String ATTACHMENT_RD_TOOL = "RD_TOOL_PROOF";
     private static final String ATTACHMENT_LEGACY = "PROOF";
+    public static final String STALE_DATA_MESSAGE = "企业数据已被其他管理员修改，请刷新后重试";
 
     private final SubmissionFormRepository submissionFormRepository;
     private final SubmissionBasicInfoRepository submissionBasicInfoRepository;
@@ -53,6 +55,7 @@ public class SubmissionService {
     private final WfTaskRepository wfTaskRepository;
     private final WfTemplateNodeRepository wfTemplateNodeRepository;
     private final SubmissionOptionService submissionOptionService;
+    private final ApprovalDataScopeService approvalDataScopeService;
 
     public SubmissionDetailVO current(CurrentUser currentUser) {
         Long enterpriseId = requireEnterpriseId(currentUser);
@@ -73,6 +76,7 @@ public class SubmissionService {
             form = submissionFormRepository.findById(req.getSubmissionId()).orElseThrow(() -> new BizException("填报单不存在"));
             assertOwner(form, enterpriseId);
             assertLatestSubmission(form, enterpriseId);
+            assertVersionMatches(form, req.getVersion());
             if (!isEditableStatus(form.getStatus())) {
                 throw new BizException("当前状态不允许编辑");
             }
@@ -116,9 +120,11 @@ public class SubmissionService {
         if (req.getSubmissionId() != null && !submissionId.equals(req.getSubmissionId())) {
             throw new BizException("提交单据不匹配");
         }
+        assertVersionRequiredAndMatches(form, req.getVersion());
         if (!isApproverEditableStatus(form.getStatus())) {
             throw new BizException("当前状态不允许管理员编辑");
         }
+        approvalDataScopeService.assertCanAccessSubmission(form, currentUser);
         if (req.getReportYear() != null) {
             form.setReportYear(req.getReportYear());
         }
@@ -138,13 +144,14 @@ public class SubmissionService {
     }
 
     @Transactional
-    public SubmissionDetailVO submit(Long submissionId, CurrentUser currentUser) {
+    public SubmissionDetailVO submit(Long submissionId, Long version, CurrentUser currentUser) {
         Long enterpriseId = requireEnterpriseId(currentUser);
         log.info("[填报] 开始提交审批，userId={}，enterpriseId={}，submissionId={}",
             currentUser.getUserId(), enterpriseId, submissionId);
         SubmissionForm form = submissionFormRepository.findById(submissionId).orElseThrow(() -> new BizException("填报单不存在"));
         assertOwner(form, enterpriseId);
         assertLatestSubmission(form, enterpriseId);
+        assertVersionMatches(form, version);
         if (!isEditableStatus(form.getStatus())) {
             throw new BizException("当前状态不允许提交");
         }
@@ -191,6 +198,10 @@ public class SubmissionService {
         SubmissionForm form = submissionFormRepository.findById(id).orElseThrow(() -> new BizException("填报单不存在"));
         if (currentUser.getRoles().contains("ENTERPRISE_USER")) {
             assertOwner(form, requireEnterpriseId(currentUser));
+        } else if (currentUser.getRoles().contains("APPROVER_ADMIN") || currentUser.getRoles().contains("SYS_ADMIN")) {
+            approvalDataScopeService.assertCanAccessSubmission(form, currentUser);
+        } else {
+            throw new BizException("无权查看该填报单");
         }
         return detail(form, currentUser);
     }
@@ -250,6 +261,7 @@ public class SubmissionService {
 
         return SubmissionDetailVO.builder()
             .submissionId(form.getId())
+            .version(form.getVersion())
             .documentNo(resolveDocumentNo(form))
             .enterpriseId(form.getEnterpriseId())
             .reportYear(form.getReportYear())
@@ -267,6 +279,23 @@ public class SubmissionService {
             .rdToolInfo(rd)
             .attachments(attachments)
             .build();
+    }
+
+    public static void assertVersionMatches(SubmissionForm form, Long expectedVersion) {
+        if (form == null || expectedVersion == null) {
+            return;
+        }
+        assertVersionRequiredAndMatches(form, expectedVersion);
+    }
+
+    public static void assertVersionRequiredAndMatches(SubmissionForm form, Long expectedVersion) {
+        if (form == null || expectedVersion == null) {
+            throw new BizException(STALE_DATA_MESSAGE);
+        }
+        Long currentVersion = form.getVersion() == null ? 0L : form.getVersion();
+        if (!Objects.equals(currentVersion, expectedVersion)) {
+            throw new BizException(STALE_DATA_MESSAGE);
+        }
     }
 
     public SubmissionListItemVO toListItem(SubmissionForm form) {

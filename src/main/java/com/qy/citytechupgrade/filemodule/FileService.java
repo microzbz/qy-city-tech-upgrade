@@ -1,6 +1,7 @@
 package com.qy.citytechupgrade.filemodule;
 
 import com.qy.citytechupgrade.audit.AuditService;
+import com.qy.citytechupgrade.approval.ApprovalDataScopeService;
 import com.qy.citytechupgrade.common.exception.BizException;
 import com.qy.citytechupgrade.common.enums.SubmissionStatus;
 import com.qy.citytechupgrade.common.security.CurrentUser;
@@ -52,6 +53,7 @@ public class FileService {
     private final SubmissionAttachmentRepository submissionAttachmentRepository;
     private final SubmissionFormRepository submissionFormRepository;
     private final AuditService auditService;
+    private final ApprovalDataScopeService approvalDataScopeService;
 
     public FileUploadResult upload(Long submissionId,
                                    String attachmentType,
@@ -84,6 +86,7 @@ public class FileService {
                 throw new BizException("当前状态不可上传附件");
             }
         } else if (currentUser.getRoles().contains("APPROVER_ADMIN") || currentUser.getRoles().contains("SYS_ADMIN")) {
+            approvalDataScopeService.assertCanAccessSubmission(form, currentUser);
             if (!submissionService.isApproverEditableStatus(form.getStatus())) {
                 throw new BizException("当前状态不允许管理员上传附件");
             }
@@ -176,6 +179,7 @@ public class FileService {
                 throw new BizException("当前状态不可删除附件");
             }
         } else if (currentUser.getRoles().contains("APPROVER_ADMIN") || currentUser.getRoles().contains("SYS_ADMIN")) {
+            approvalDataScopeService.assertCanAccessSubmission(form, currentUser);
             if (!submissionService.isApproverEditableStatus(form.getStatus())) {
                 throw new BizException("当前状态不允许管理员删除附件");
             }
@@ -206,6 +210,11 @@ public class FileService {
             .orElseThrow(() -> new BizException("填报单不存在"));
 
         if (currentUser.getRoles().contains("ENTERPRISE_USER") && !form.getEnterpriseId().equals(currentUser.getEnterpriseId())) {
+            throw new BizException("无权限访问该附件");
+        }
+        if (currentUser.getRoles().contains("APPROVER_ADMIN") || currentUser.getRoles().contains("SYS_ADMIN")) {
+            approvalDataScopeService.assertCanAccessSubmission(form, currentUser);
+        } else if (!currentUser.getRoles().contains("ENTERPRISE_USER")) {
             throw new BizException("无权限访问该附件");
         }
 

@@ -8,6 +8,9 @@
       <el-table-column prop="displayName" label="姓名" width="140"/>
       <el-table-column prop="status" label="状态" width="120"/>
       <el-table-column prop="enterpriseId" label="企业ID" width="100"/>
+      <el-table-column prop="enterpriseCodeFirstDigitScope" label="管理编码1位" width="130">
+        <template #default="scope">{{ scope.row.enterpriseCodeFirstDigitScope || '全部' }}</template>
+      </el-table-column>
       <el-table-column label="角色">
         <template #default="scope">{{ (scope.row.roleCodes || []).join(', ') }}</template>
       </el-table-column>
@@ -40,6 +43,14 @@
             <el-option label="APPROVER_ADMIN" value="APPROVER_ADMIN"/>
           </el-select>
         </el-form-item>
+        <el-form-item v-if="isApproverForm" label="管理编码1位">
+          <el-input
+            v-model="form.enterpriseCodeFirstDigitScope"
+            maxlength="1"
+            clearable
+            placeholder="留空表示可查看全部"
+          />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showDialog=false">取消</el-button>
@@ -50,15 +61,25 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import http from '../api/http'
 
 const rows = ref([])
 const showDialog = ref(false)
 const pageSizeOptions = [10, 20, 50, 100]
 const pager = reactive({ page: 1, size: 20, total: 0 })
-const form = reactive({ id: null, username: '', displayName: '', password: '', status: 'ACTIVE', enterpriseId: '', roleCodes: [] })
+const form = reactive({
+  id: null,
+  username: '',
+  displayName: '',
+  password: '',
+  status: 'ACTIVE',
+  enterpriseId: '',
+  enterpriseCodeFirstDigitScope: '',
+  roleCodes: []
+})
+const isApproverForm = computed(() => form.roleCodes.includes('APPROVER_ADMIN'))
 
 const load = async () => {
   const res = await http.get('/users', { params: { page: pager.page, size: pager.size } })
@@ -76,6 +97,7 @@ const reset = () => {
   form.password = ''
   form.status = 'ACTIVE'
   form.enterpriseId = ''
+  form.enterpriseCodeFirstDigitScope = ''
   form.roleCodes = []
 }
 
@@ -91,28 +113,46 @@ const openEdit = (row) => {
   form.password = ''
   form.status = row.status
   form.enterpriseId = row.enterpriseId
+  form.enterpriseCodeFirstDigitScope = row.enterpriseCodeFirstDigitScope || ''
   form.roleCodes = [...(row.roleCodes || [])]
   showDialog.value = true
 }
 
 const save = async () => {
+  if (isApproverForm.value && !`${form.enterpriseCodeFirstDigitScope || ''}`.trim()) {
+    try {
+      await ElMessageBox.confirm(
+        '该用户可以查看任意企业的填报数据，确定创建？',
+        '权限确认',
+        {
+          type: 'warning',
+          confirmButtonText: '确定',
+          cancelButtonText: '取消'
+        }
+      )
+    } catch {
+      return
+    }
+  }
   if (!form.id) {
     const payload = {
       username: form.username,
       password: form.password,
       displayName: form.displayName,
       enterpriseId: form.enterpriseId ? Number(form.enterpriseId) : null,
+      enterpriseCodeFirstDigitScope: isApproverForm.value ? (form.enterpriseCodeFirstDigitScope || null) : null,
       roleCodes: form.roleCodes
     }
     await http.post('/users', payload)
   } else {
+    await http.put(`/users/${form.id}/roles`, { roleCodes: form.roleCodes })
     await http.put(`/users/${form.id}`, {
       displayName: form.displayName,
       password: form.password,
       status: form.status,
-      enterpriseId: form.enterpriseId ? Number(form.enterpriseId) : null
+      enterpriseId: form.enterpriseId ? Number(form.enterpriseId) : null,
+      enterpriseCodeFirstDigitScope: isApproverForm.value ? (form.enterpriseCodeFirstDigitScope || null) : null
     })
-    await http.put(`/users/${form.id}/roles`, { roleCodes: form.roleCodes })
   }
   ElMessage.success('保存成功')
   showDialog.value = false
@@ -131,4 +171,14 @@ const onSizeChange = (size) => {
 }
 
 onMounted(load)
+
+watch(
+  () => form.roleCodes,
+  () => {
+    if (!isApproverForm.value) {
+      form.enterpriseCodeFirstDigitScope = ''
+    }
+  },
+  { deep: true }
+)
 </script>

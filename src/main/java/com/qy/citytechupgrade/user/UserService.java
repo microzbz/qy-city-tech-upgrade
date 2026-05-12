@@ -69,7 +69,6 @@ public class UserService {
         if (set.contains("APPROVER_ADMIN")) {
             menus.add(menu("approval-todo", "待审批", "/approvals/todo"));
             menus.add(menu("approval-done", "已审批", "/approvals/done"));
-            menus.add(menu("users", "用户管理", "/admin/users"));
             menus.add(menu("audit", "审计日志", "/admin/audit-logs"));
             menus.add(menu("notices", "我的消息", "/common/notices"));
         }
@@ -126,6 +125,7 @@ public class UserService {
         user.setUsername(request.getUsername());
         user.setDisplayName(request.getDisplayName());
         user.setEnterpriseId(request.getEnterpriseId());
+        user.setEnterpriseCodeFirstDigitScope(normalizeEnterpriseCodeFirstDigitScope(request.getEnterpriseCodeFirstDigitScope(), request.getRoleCodes()));
         user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
         user.setStatus(UserStatus.ACTIVE);
         sysUserRepository.save(user);
@@ -140,6 +140,10 @@ public class UserService {
         user.setDisplayName(request.getDisplayName());
         user.setEnterpriseId(request.getEnterpriseId());
         user.setStatus(request.getStatus());
+        user.setEnterpriseCodeFirstDigitScope(normalizeEnterpriseCodeFirstDigitScope(
+            request.getEnterpriseCodeFirstDigitScope(),
+            getRoleCodesByUserId(userId)
+        ));
         if (request.getPassword() != null && !request.getPassword().isBlank()) {
             user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
         }
@@ -165,6 +169,8 @@ public class UserService {
 
         sysUserRoleRepository.deleteByUserId(user.getId());
         sysUserRoleRepository.flush();
+        user.setEnterpriseCodeFirstDigitScope(normalizeEnterpriseCodeFirstDigitScope(user.getEnterpriseCodeFirstDigitScope(), normalizedRoleCodes));
+        sysUserRepository.save(user);
         for (SysRole role : roles) {
             SysUserRole ur = new SysUserRole();
             ur.setUserId(user.getId());
@@ -186,5 +192,20 @@ public class UserService {
         ur.setUserId(user.getId());
         ur.setRoleId(role.getId());
         sysUserRoleRepository.save(ur);
+    }
+
+    private String normalizeEnterpriseCodeFirstDigitScope(String value, List<String> roleCodes) {
+        boolean isApprover = roleCodes != null && roleCodes.stream()
+            .filter(StringUtils::hasText)
+            .map(String::trim)
+            .anyMatch(RoleCode.APPROVER_ADMIN.name()::equals);
+        if (!isApprover || !StringUtils.hasText(value)) {
+            return null;
+        }
+        String normalized = value.trim();
+        if (normalized.length() > 1) {
+            throw new BizException("管理企业第一位编码只能填写1位");
+        }
+        return normalized;
     }
 }

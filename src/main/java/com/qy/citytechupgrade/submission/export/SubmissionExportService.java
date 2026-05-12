@@ -2,6 +2,7 @@ package com.qy.citytechupgrade.submission.export;
 
 import com.openhtmltopdf.pdfboxout.PdfRendererBuilder;
 import com.qy.citytechupgrade.audit.AuditService;
+import com.qy.citytechupgrade.approval.ApprovalDataScopeService;
 import com.qy.citytechupgrade.common.dto.PagedResult;
 import com.qy.citytechupgrade.common.enums.SubmissionStatus;
 import com.qy.citytechupgrade.common.exception.BizException;
@@ -59,6 +60,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -93,6 +95,7 @@ public class SubmissionExportService {
     private final IndustryService industryService;
     private final AuditService auditService;
     private final AppProperties appProperties;
+    private final ApprovalDataScopeService approvalDataScopeService;
 
     private final Map<String, ExportJobState> jobs = new ConcurrentHashMap<>();
     private final ExecutorService exportExecutor = Executors.newSingleThreadExecutor(r -> {
@@ -111,7 +114,7 @@ public class SubmissionExportService {
         CurrentUser currentUser
     ) {
         assertApprover(currentUser);
-        List<ApprovedSubmissionListItemVO> items = findApprovedForms(companyName, status, startTime, endTime).stream()
+        List<ApprovedSubmissionListItemVO> items = findApprovedForms(companyName, status, startTime, endTime, currentUser).stream()
             .map(this::toApprovedListItem)
             .toList();
         int safePage = page == null || page < 1 ? 1 : page;
@@ -129,7 +132,7 @@ public class SubmissionExportService {
         CurrentUser currentUser
     ) throws IOException {
         assertApprover(currentUser);
-        List<SubmissionForm> forms = findApprovedForms(companyName, status, startTime, endTime);
+        List<SubmissionForm> forms = findApprovedForms(companyName, status, startTime, endTime, currentUser);
         String fileName = buildReportFileName();
         Path reportDir = getExportRoot().resolve("reports");
         Path reportPath = reportDir.resolve(fileName);
@@ -159,13 +162,14 @@ public class SubmissionExportService {
 
         List<SubmissionForm> forms = submissionFormRepository.findAllById(submissionIds).stream()
             .filter(this::isZipExportAllowed)
+            .filter(form -> approvalDataScopeService.canAccessSubmission(form, currentUser))
             .sorted(Comparator.comparing(SubmissionForm::getUpdatedAt).reversed())
             .toList();
         if (forms.size() != submissionIds.size()) {
             throw new BizException("选中的记录中包含不可导出单据，请刷新后重试");
         }
 
-        ExportJobState job = ExportJobState.create(forms);
+        ExportJobState job = ExportJobState.create(forms, currentUser.getUserId());
         jobs.put(job.getJobId(), job);
         exportExecutor.submit(() -> runJob(job, currentUser));
         return toJobVO(job);
@@ -177,6 +181,7 @@ public class SubmissionExportService {
         if (job == null) {
             throw new BizException("导出任务不存在");
         }
+        assertCanAccessJob(job, currentUser);
         return toJobVO(job);
     }
 
@@ -186,6 +191,7 @@ public class SubmissionExportService {
         if (job == null) {
             throw new BizException("导出任务不存在");
         }
+        assertCanAccessJob(job, currentUser);
         if (!job.isDownloadReady() || job.getZipPath() == null || !Files.exists(job.getZipPath())) {
             throw new BizException("导出文件尚未生成完成");
         }
@@ -465,7 +471,8 @@ public class SubmissionExportService {
         String companyName,
         String status,
         LocalDateTime startTime,
-        LocalDateTime endTime
+        LocalDateTime endTime,
+        CurrentUser currentUser
     ) {
         if (startTime != null && endTime != null && startTime.isAfter(endTime)) {
             throw new BizException("开始时间不能晚于结束时间");
@@ -473,6 +480,7 @@ public class SubmissionExportService {
         String normalizedCompanyName = normalizeKeyword(companyName);
         List<SubmissionStatus> statuses = resolveApprovedStatuses(status);
         return submissionFormRepository.findByStatusInOrderByUpdatedAtDesc(statuses).stream()
+            .filter(form -> approvalDataScopeService.canAccessSubmission(form, currentUser))
             .filter(form -> matchesCompanyName(form, normalizedCompanyName))
             .filter(form -> matchesHandledTime(form, startTime, endTime))
             .toList();
@@ -906,6 +914,7 @@ public class SubmissionExportService {
         boolean exportable = isListExportable(form.getStatus(), codeInfo);
         return ApprovedSubmissionListItemVO.builder()
             .submissionId(form.getId())
+            .version(form.getVersion())
             .documentNo(documentNo)
             .reportYear(form.getReportYear())
             .enterpriseName(enterpriseName)
@@ -977,6 +986,15 @@ public class SubmissionExportService {
     private void assertApprover(CurrentUser currentUser) {
         if (currentUser == null || (!currentUser.getRoles().contains("APPROVER_ADMIN") && !currentUser.getRoles().contains("SYS_ADMIN"))) {
             throw new BizException("无权限执行导出操作");
+        }
+    }
+
+    private void assertCanAccessJob(ExportJobState job, CurrentUser currentUser) {
+        if (currentUser.getRoles().contains("SYS_ADMIN")) {
+            return;
+        }
+        if (!Objects.equals(job.getOwnerUserId(), currentUser.getUserId())) {
+            throw new BizException("无权访问该导出任务");
         }
     }
 
@@ -1086,6 +1104,7 @@ public class SubmissionExportService {
     private static class ExportJobState {
         private final String jobId;
         private final List<SubmissionForm> forms;
+        private final Long ownerUserId;
         private final LocalDateTime createdAt;
         private final int totalCount;
         private final List<ApprovedSubmissionExportItemResultVO> items = new CopyOnWriteArrayList<>();
@@ -1101,16 +1120,17 @@ public class SubmissionExportService {
         private volatile LocalDateTime startedAt;
         private volatile LocalDateTime finishedAt;
 
-        static ExportJobState create(List<SubmissionForm> forms) {
-            ExportJobState state = new ExportJobState(UUID.randomUUID().toString(), forms, LocalDateTime.now(), forms.size());
+        static ExportJobState create(List<SubmissionForm> forms, Long ownerUserId) {
+            ExportJobState state = new ExportJobState(UUID.randomUUID().toString(), forms, ownerUserId, LocalDateTime.now(), forms.size());
             state.setStatus("QUEUED");
             state.setMessage("导出任务已进入队列");
             return state;
         }
 
-        ExportJobState(String jobId, List<SubmissionForm> forms, LocalDateTime createdAt, int totalCount) {
+        ExportJobState(String jobId, List<SubmissionForm> forms, Long ownerUserId, LocalDateTime createdAt, int totalCount) {
             this.jobId = jobId;
             this.forms = forms;
+            this.ownerUserId = ownerUserId;
             this.createdAt = createdAt;
             this.totalCount = totalCount;
         }

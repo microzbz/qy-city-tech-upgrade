@@ -9,6 +9,7 @@ import java.util.List;
 @Data
 public class SubmissionSaveRequest {
     private Long submissionId;
+    private Long version;
     private Integer reportYear;
     private BasicInfo basicInfo;
     private DeviceInfo deviceInfo;

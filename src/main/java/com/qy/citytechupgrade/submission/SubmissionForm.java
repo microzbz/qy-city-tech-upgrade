@@ -25,6 +25,10 @@ public class SubmissionForm {
     @Column(name = "document_no", length = 32)
     private String documentNo;
 
+    @Version
+    @Column(nullable = false)
+    private Long version;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32)
     private SubmissionStatus status;
@@ -64,6 +68,9 @@ public class SubmissionForm {
         }
         if (status == null) {
             status = SubmissionStatus.DRAFT;
+        }
+        if (version == null) {
+            version = 0L;
         }
     }
 

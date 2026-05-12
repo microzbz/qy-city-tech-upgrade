@@ -5,4 +5,5 @@ import lombok.Data;
 @Data
 public class ApprovalActionRequest {
     private String comment;
+    private Long version;
 }

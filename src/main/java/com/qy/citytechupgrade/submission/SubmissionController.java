@@ -36,7 +36,7 @@ public class SubmissionController {
     @PreAuthorize("hasRole('ENTERPRISE_USER')")
     public ApiResponse<SubmissionDetailVO> submit(@RequestBody @Valid SubmitRequest request) {
         CurrentUser user = SecurityUtils.currentUser();
-        submissionService.submit(request.getSubmissionId(), user);
+        submissionService.submit(request.getSubmissionId(), request.getVersion(), user);
         approvalService.startWorkflowForSubmission(request.getSubmissionId(), user);
         return ApiResponse.success(submissionService.getById(request.getSubmissionId(), user));
     }

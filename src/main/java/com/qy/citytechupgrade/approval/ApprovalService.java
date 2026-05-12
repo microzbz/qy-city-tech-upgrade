@@ -47,6 +47,7 @@ public class ApprovalService {
     private final MsgCenterService msgCenterService;
     private final UserService userService;
     private final AuditService auditService;
+    private final ApprovalDataScopeService approvalDataScopeService;
 
     @Transactional
     public void startWorkflowForSubmission(Long submissionId, CurrentUser operator) {
@@ -101,7 +102,7 @@ public class ApprovalService {
         wfTaskRepository.save(task);
 
         submissionService.updateReviewNode(submissionId, SubmissionStatus.SUBMITTED, firstNode.getNodeSeq(), firstNode.getNodeName());
-        notifyApprovers(firstNode.getRoleCode(), "您有新的待审批单据", "单据号 " + documentNo + " 已进入审批");
+        notifyApprovers(firstNode.getRoleCode(), submissionId, "您有新的待审批单据", "单据号 " + documentNo + " 已进入审批");
 
         auditService.log(operator.getUserId(), "WORKFLOW", "START", String.valueOf(submissionId), "发起审批流程，单据号: " + documentNo);
         log.info("[审批] 流程已发起，submissionId={}，documentNo={}，instanceId={}，templateId={}，firstTaskId={}，firstNodeSeq={}，firstNodeName={}，roleCode={}",
@@ -129,6 +130,7 @@ public class ApprovalService {
         String normalizedDocumentNo = normalizeKeyword(documentNo);
         String normalizedEnterpriseName = normalizeKeyword(enterpriseName);
         List<ApprovalTaskVO> filtered = tasks.stream()
+            .filter(task -> canAccessTask(task, currentUser))
             .map(this::toTaskVO)
             .filter(task -> matchesTodoFilters(task, normalizedDocumentNo, normalizedEnterpriseName, startTime, endTime))
             .toList();
@@ -146,7 +148,10 @@ public class ApprovalService {
         } else {
             tasks = wfTaskRepository.findByStatusAndRoleCodeInOrderByCreatedAtDesc(TaskStatus.DONE, currentUser.getRoles().stream().toList());
         }
-        return tasks.stream().map(this::toTaskVO).toList();
+        return tasks.stream()
+            .filter(task -> canAccessTask(task, currentUser))
+            .map(this::toTaskVO)
+            .toList();
     }
 
     public ApprovalTaskVO detail(Long taskId, CurrentUser currentUser) {
@@ -154,34 +159,38 @@ public class ApprovalService {
         if (!currentUser.getRoles().contains("SYS_ADMIN") && !currentUser.getRoles().contains(task.getRoleCode())) {
             throw new BizException("无权查看该审批任务");
         }
+        assertCanAccessTask(task, currentUser);
         return toTaskVO(task);
     }
 
     @Transactional
-    public void approve(Long taskId, String comment, CurrentUser operator) {
-        handle(taskId, TaskAction.APPROVE, comment, operator);
+    public void approve(Long taskId, String comment, Long version, CurrentUser operator) {
+        handle(taskId, TaskAction.APPROVE, comment, version, operator);
     }
 
     @Transactional
-    public void reject(Long taskId, String comment, CurrentUser operator) {
-        handle(taskId, TaskAction.REJECT, comment, operator);
+    public void reject(Long taskId, String comment, Long version, CurrentUser operator) {
+        handle(taskId, TaskAction.REJECT, comment, version, operator);
     }
 
     @Transactional
-    public void returnBack(Long taskId, String comment, CurrentUser operator) {
-        handle(taskId, TaskAction.RETURN, comment, operator);
+    public void returnBack(Long taskId, String comment, Long version, CurrentUser operator) {
+        handle(taskId, TaskAction.RETURN, comment, version, operator);
     }
 
     @Transactional
     public SubmissionDetailVO saveEditedSubmission(Long submissionId, SubmissionSaveRequest request, CurrentUser operator) {
+        approvalDataScopeService.assertCanAccessSubmission(submissionId, operator);
         return submissionService.saveByApprover(submissionId, request, operator);
     }
 
     @Transactional
-    public SubmissionDetailVO submitEditedSubmission(Long submissionId, CurrentUser operator) {
+    public SubmissionDetailVO submitEditedSubmission(Long submissionId, Long version, CurrentUser operator) {
         log.info("[审批] 管理员开始提交修改后的单据，submissionId={}，operatorId={}，roles={}",
             submissionId, operator.getUserId(), operator.getRoles());
         SubmissionForm form = submissionService.getByIdOrThrow(submissionId);
+        approvalDataScopeService.assertCanAccessSubmission(form, operator);
+        submissionService.assertVersionRequiredAndMatches(form, version);
         if (!submissionService.isApproverEditableStatus(form.getStatus())) {
             throw new BizException("当前状态不允许管理员提交修改");
         }
@@ -206,10 +215,12 @@ public class ApprovalService {
     }
 
     @Transactional
-    public SubmissionDetailVO returnApprovedSubmission(Long submissionId, String comment, CurrentUser operator) {
+    public SubmissionDetailVO returnApprovedSubmission(Long submissionId, String comment, Long version, CurrentUser operator) {
         log.info("[审批] 管理员开始退回已通过单据，submissionId={}，operatorId={}，comment={}",
             submissionId, operator.getUserId(), comment);
         SubmissionForm form = submissionService.getByIdOrThrow(submissionId);
+        approvalDataScopeService.assertCanAccessSubmission(form, operator);
+        submissionService.assertVersionRequiredAndMatches(form, version);
         if (form.getStatus() != SubmissionStatus.APPROVED) {
             throw new BizException("仅已审批通过的填报支持退回企业");
         }
@@ -234,7 +245,7 @@ public class ApprovalService {
         return submissionService.detail(refreshed, operator);
     }
 
-    private void handle(Long taskId, TaskAction action, String comment, CurrentUser operator) {
+    private void handle(Long taskId, TaskAction action, String comment, Long version, CurrentUser operator) {
         log.info("[审批] 开始处理任务，taskId={}，action={}，operatorId={}，roles={}，comment={}",
             taskId, action, operator.getUserId(), operator.getRoles(), comment);
         WfTask task = wfTaskRepository.findById(taskId).orElseThrow(() -> new BizException("审批任务不存在"));
@@ -246,9 +257,12 @@ public class ApprovalService {
         if (!hasRole && !operator.getRoles().contains("SYS_ADMIN")) {
             throw new BizException("无权处理该审批任务");
         }
+        assertCanAccessTask(task, operator);
 
         WfInstance instance = wfInstanceRepository.findById(task.getInstanceId()).orElseThrow(() -> new BizException("流程实例不存在"));
         Long submissionId = instance.getBusinessId();
+        SubmissionForm form = submissionService.getByIdOrThrow(submissionId);
+        submissionService.assertVersionRequiredAndMatches(form, version);
 
         task.setStatus(TaskStatus.DONE);
         task.setAction(action);
@@ -297,7 +311,7 @@ public class ApprovalService {
         submissionService.updateReviewNode(submissionId, SubmissionStatus.UNDER_REVIEW, next.getNodeSeq(), next.getNodeName());
         SubmissionForm form = submissionFormRepository.findById(submissionId).orElse(null);
         String documentNo = resolveDocumentNo(form, submissionId);
-        notifyApprovers(next.getRoleCode(), "您有新的待审批单据", "单据号 " + documentNo + " 已流转到下一节点");
+        notifyApprovers(next.getRoleCode(), submissionId, "您有新的待审批单据", "单据号 " + documentNo + " 已流转到下一节点");
         notifyEnterpriseUsers(submissionId, "审批进度更新", "单据号 " + documentNo + " 正在审核中，当前节点: " + next.getNodeName());
 
         auditService.log(operator.getUserId(), "APPROVAL", "APPROVE", String.valueOf(submissionId),
@@ -400,9 +414,12 @@ public class ApprovalService {
         return operator.getRoles().stream().findFirst().orElse("APPROVER_ADMIN");
     }
 
-    private void notifyApprovers(String roleCode, String title, String content) {
+    private void notifyApprovers(String roleCode, Long submissionId, String title, String content) {
         List<SysUser> users = userService.listUsersByRoleCode(roleCode);
         for (SysUser user : users) {
+            if (!approvalDataScopeService.canReceiveApprovalNotice(user, roleCode, submissionId)) {
+                continue;
+            }
             noticeService.push(user.getId(), title, content);
         }
     }
@@ -433,6 +450,7 @@ public class ApprovalService {
         return ApprovalTaskVO.builder()
             .taskId(task.getId())
             .submissionId(submissionId)
+            .version(form == null ? null : form.getVersion())
             .documentNo(resolveDocumentNo(form, submissionId))
             .reportYear(form == null ? null : form.getReportYear())
             .submissionStatus(form == null ? null : form.getStatus().name())
@@ -446,6 +464,18 @@ public class ApprovalService {
             .createdAt(task.getCreatedAt())
             .handledAt(task.getHandledAt())
             .build();
+    }
+
+    private boolean canAccessTask(WfTask task, CurrentUser currentUser) {
+        WfInstance instance = task == null ? null : wfInstanceRepository.findById(task.getInstanceId()).orElse(null);
+        Long submissionId = instance == null ? null : instance.getBusinessId();
+        return approvalDataScopeService.canAccessSubmission(submissionId, currentUser);
+    }
+
+    private void assertCanAccessTask(WfTask task, CurrentUser currentUser) {
+        WfInstance instance = task == null ? null : wfInstanceRepository.findById(task.getInstanceId()).orElse(null);
+        Long submissionId = instance == null ? null : instance.getBusinessId();
+        approvalDataScopeService.assertCanAccessSubmission(submissionId, currentUser);
     }
 
     private boolean matchesTodoFilters(

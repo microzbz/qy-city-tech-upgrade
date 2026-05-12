@@ -16,4 +16,5 @@ public class UpdateUserRequest {
     private UserStatus status;
 
     private Long enterpriseId;
+    private String enterpriseCodeFirstDigitScope;
 }

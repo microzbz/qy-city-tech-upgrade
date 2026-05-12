@@ -2,6 +2,7 @@ package com.qy.citytechupgrade.audit;
 
 import com.qy.citytechupgrade.common.dto.ApiResponse;
 import com.qy.citytechupgrade.common.dto.PagedResult;
+import com.qy.citytechupgrade.common.security.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -28,6 +29,8 @@ public class AuditController {
         @RequestParam(defaultValue = "1") Integer page,
         @RequestParam(defaultValue = "20") Integer size
     ) {
-        return ApiResponse.success(auditService.latest(documentNo, companyName, startTime, endTime, page, size));
+        return ApiResponse.success(auditService.latest(
+            documentNo, companyName, startTime, endTime, page, size, SecurityUtils.currentUser()
+        ));
     }
 }

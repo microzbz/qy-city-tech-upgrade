@@ -38,9 +38,9 @@
         <template #default="scope">
           <el-button type="primary" link @click="viewSubmission(scope.row.submissionId, scope.row.taskId)">查看</el-button>
           <el-button type="warning" link @click="editSubmission(scope.row.submissionId, scope.row.taskId)">编辑</el-button>
-          <el-button type="success" link @click="act(scope.row.taskId, 'approve')">通过</el-button>
-          <el-button type="danger" link @click="act(scope.row.taskId, 'reject')">驳回</el-button>
-          <el-button type="warning" link @click="act(scope.row.taskId, 'return')">退回</el-button>
+          <el-button type="success" link @click="act(scope.row, 'approve')">通过</el-button>
+          <el-button type="danger" link @click="act(scope.row, 'reject')">驳回</el-button>
+          <el-button type="warning" link @click="act(scope.row, 'return')">退回</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -118,7 +118,7 @@ function getActionDialogConfig(action) {
   }
 }
 
-const act = async (taskId, action) => {
+const act = async (row, action) => {
   const dialog = getActionDialogConfig(action)
   const { value } = await ElMessageBox.prompt(dialog.message, dialog.title, {
     inputValue: dialog.inputValue,
@@ -132,7 +132,7 @@ const act = async (taskId, action) => {
       return true
     }
   })
-  await http.post(`/approvals/${taskId}/${action}`, { comment: value.trim() })
+  await http.post(`/approvals/${row.taskId}/${action}`, { comment: value.trim(), version: row.version })
   await load()
 }
 

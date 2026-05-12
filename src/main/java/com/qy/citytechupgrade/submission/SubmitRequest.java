@@ -7,4 +7,6 @@ import lombok.Data;
 public class SubmitRequest {
     @NotNull(message = "submissionId不能为空")
     private Long submissionId;
+
+    private Long version;
 }

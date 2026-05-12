@@ -10,6 +10,7 @@ import java.time.LocalDateTime;
 public class ApprovalTaskVO {
     private Long taskId;
     private Long submissionId;
+    private Long version;
     private String documentNo;
     private Integer reportYear;
     private String submissionStatus;

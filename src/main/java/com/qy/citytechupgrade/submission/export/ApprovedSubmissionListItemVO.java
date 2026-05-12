@@ -9,6 +9,7 @@ import java.time.LocalDateTime;
 @Builder
 public class ApprovedSubmissionListItemVO {
     private Long submissionId;
+    private Long version;
     private String documentNo;
     private Integer reportYear;
     private String enterpriseName;

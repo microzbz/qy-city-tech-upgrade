@@ -17,5 +17,6 @@ public class CreateUserRequest {
     private String displayName;
 
     private Long enterpriseId;
+    private String enterpriseCodeFirstDigitScope;
     private List<String> roleCodes;
 }

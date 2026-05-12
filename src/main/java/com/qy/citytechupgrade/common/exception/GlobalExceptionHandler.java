@@ -1,6 +1,9 @@
 package com.qy.citytechupgrade.common.exception;
 
 import com.qy.citytechupgrade.common.dto.ApiResponse;
+import com.qy.citytechupgrade.submission.SubmissionService;
+import jakarta.persistence.OptimisticLockException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -14,6 +17,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BizException.class)
     public ResponseEntity<ApiResponse<Object>> handleBiz(BizException ex) {
         return ResponseEntity.badRequest().body(ApiResponse.error(ex.getMessage()));
+    }
+
+    @ExceptionHandler({OptimisticLockException.class, ObjectOptimisticLockingFailureException.class})
+    public ResponseEntity<ApiResponse<Object>> handleOptimisticLock(Exception ex) {
+        return ResponseEntity.badRequest().body(ApiResponse.error(SubmissionService.STALE_DATA_MESSAGE));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

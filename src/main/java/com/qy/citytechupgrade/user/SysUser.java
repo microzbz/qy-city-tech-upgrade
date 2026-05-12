@@ -32,6 +32,9 @@ public class SysUser {
     @Column(name = "enterprise_id")
     private Long enterpriseId;
 
+    @Column(name = "enterprise_code_first_digit_scope", length = 1)
+    private String enterpriseCodeFirstDigitScope;
+
     @Column(name = "last_login_at")
     private LocalDateTime lastLoginAt;
 

@@ -49,21 +49,21 @@ public class ApprovalController {
     @PostMapping("/{taskId}/approve")
     @PreAuthorize("hasAnyRole('APPROVER_ADMIN','SYS_ADMIN')")
     public ApiResponse<String> approve(@PathVariable Long taskId, @RequestBody(required = false) ApprovalActionRequest req) {
-        approvalService.approve(taskId, req == null ? null : req.getComment(), SecurityUtils.currentUser());
+        approvalService.approve(taskId, req == null ? null : req.getComment(), req == null ? null : req.getVersion(), SecurityUtils.currentUser());
         return ApiResponse.success("审批通过", "OK");
     }
 
     @PostMapping("/{taskId}/reject")
     @PreAuthorize("hasAnyRole('APPROVER_ADMIN','SYS_ADMIN')")
     public ApiResponse<String> reject(@PathVariable Long taskId, @RequestBody(required = false) ApprovalActionRequest req) {
-        approvalService.reject(taskId, req == null ? null : req.getComment(), SecurityUtils.currentUser());
+        approvalService.reject(taskId, req == null ? null : req.getComment(), req == null ? null : req.getVersion(), SecurityUtils.currentUser());
         return ApiResponse.success("已驳回", "OK");
     }
 
     @PostMapping("/{taskId}/return")
     @PreAuthorize("hasAnyRole('APPROVER_ADMIN','SYS_ADMIN')")
     public ApiResponse<String> returnBack(@PathVariable Long taskId, @RequestBody(required = false) ApprovalActionRequest req) {
-        approvalService.returnBack(taskId, req == null ? null : req.getComment(), SecurityUtils.currentUser());
+        approvalService.returnBack(taskId, req == null ? null : req.getComment(), req == null ? null : req.getVersion(), SecurityUtils.currentUser());
         return ApiResponse.success("已退回", "OK");
     }
 
@@ -75,8 +75,13 @@ public class ApprovalController {
 
     @PostMapping("/submissions/{submissionId}/submit-edit")
     @PreAuthorize("hasAnyRole('APPROVER_ADMIN','SYS_ADMIN')")
-    public ApiResponse<SubmissionDetailVO> submitEdit(@PathVariable Long submissionId) {
-        return ApiResponse.success(approvalService.submitEditedSubmission(submissionId, SecurityUtils.currentUser()));
+    public ApiResponse<SubmissionDetailVO> submitEdit(@PathVariable Long submissionId,
+                                                      @RequestBody(required = false) ApprovalActionRequest req) {
+        return ApiResponse.success(approvalService.submitEditedSubmission(
+            submissionId,
+            req == null ? null : req.getVersion(),
+            SecurityUtils.currentUser()
+        ));
     }
 
     @PostMapping("/submissions/{submissionId}/return-approved")
@@ -86,6 +91,7 @@ public class ApprovalController {
         return ApiResponse.success(approvalService.returnApprovedSubmission(
             submissionId,
             req == null ? null : req.getComment(),
+            req == null ? null : req.getVersion(),
             SecurityUtils.currentUser()
         ));
     }

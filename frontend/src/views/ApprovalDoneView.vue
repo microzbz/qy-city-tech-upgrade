@@ -78,7 +78,7 @@
         <template #default="{ row }">
           <el-button type="primary" link @click="viewSubmission(row.submissionId)">查看</el-button>
           <el-button v-if="['APPROVED', 'RETURNED', 'REJECTED'].includes(row.status)" type="warning" link @click="editSubmission(row.submissionId)">编辑</el-button>
-          <el-button v-if="row.status === 'APPROVED'" type="danger" link @click="returnSubmission(row.submissionId)">退回企业</el-button>
+          <el-button v-if="row.status === 'APPROVED'" type="danger" link @click="returnSubmission(row)">退回企业</el-button>
           <el-button type="success" link :disabled="polling || !row.exportable" @click="startExport([row])">导出</el-button>
         </template>
       </el-table-column>
@@ -232,7 +232,7 @@ async function editSubmission(submissionId) {
   }
 }
 
-async function returnSubmission(submissionId) {
+async function returnSubmission(row) {
   try {
     const defaultComment = '新型技改城市项目材料需要补充完善'
     const { value } = await ElMessageBox.prompt('请输入退回原因', '退回企业', {
@@ -247,7 +247,10 @@ async function returnSubmission(submissionId) {
         return true
       }
     })
-    await http.post(`/approvals/submissions/${submissionId}/return-approved`, { comment: value.trim() })
+    await http.post(`/approvals/submissions/${row.submissionId}/return-approved`, {
+      comment: value.trim(),
+      version: row.version
+    })
     ElMessage.success('已退回企业修改')
     await loadRows()
   } catch (error) {

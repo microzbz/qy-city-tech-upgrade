@@ -10,6 +10,7 @@ import java.util.List;
 @Builder
 public class SubmissionDetailVO {
     private Long submissionId;
+    private Long version;
     private String documentNo;
     private Long enterpriseId;
     private Integer reportYear;

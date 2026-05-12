@@ -303,6 +303,7 @@ const saving = ref(false)
 const submitting = ref(false)
 const formStatus = ref('DRAFT')
 const submissionId = ref(null)
+const submissionVersion = ref(null)
 const attachments = ref([])
 const dirty = ref(false)
 const suppressDirty = ref(false)
@@ -553,6 +554,7 @@ const listEquals = (a = [], b = []) => {
 const fillForm = async (data) => {
   suppressDirty.value = true
   submissionId.value = data.submissionId
+  submissionVersion.value = data.version ?? null
   formStatus.value = data.status
   detailReviewActionLabel.value = data.reviewActionLabel || ''
   detailReviewHandledAt.value = data.reviewHandledAt || ''
@@ -963,6 +965,7 @@ const validateRequiredSelections = () => {
 
 const buildSubmissionPayload = () => ({
   submissionId: submissionId.value,
+  version: submissionVersion.value,
   reportYear: new Date().getFullYear(),
   basicInfo: form.basicInfo,
   deviceInfo: form.deviceInfo,
@@ -1064,7 +1067,7 @@ const submit = async () => {
         confirmButtonText: '确定提交',
         cancelButtonText: '取消'
       })
-      const res = await http.post(`/approvals/submissions/${submissionId.value}/submit-edit`)
+      const res = await http.post(`/approvals/submissions/${submissionId.value}/submit-edit`, { version: submissionVersion.value })
       const nextQuery = { ...route.query }
       delete nextQuery.mode
       await router.replace({
@@ -1113,7 +1116,7 @@ const submit = async () => {
       ElMessage.warning('保存后未生成填报单，请重试')
       return
     }
-    await http.post('/submissions/submit', { submissionId: submissionId.value })
+    await http.post('/submissions/submit', { submissionId: submissionId.value, version: submissionVersion.value })
     ElMessage.success('已提交审批')
     await loadCurrent()
   } finally {
@@ -1133,7 +1136,7 @@ const handleReview = async (action) => {
   }
   approvingAction.value = action
   try {
-    await http.post(`/approvals/${reviewTaskId.value}/${action}`, { comment })
+    await http.post(`/approvals/${reviewTaskId.value}/${action}`, { comment, version: submissionVersion.value })
     reviewHandled.value = true
     ElMessage.success(action === 'approve' ? '审批通过' : '已驳回')
     await loadReviewTaskDetail()
