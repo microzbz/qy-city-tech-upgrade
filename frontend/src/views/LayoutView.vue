@@ -4,7 +4,7 @@
       <div class="brand-row">
         <div class="brand-left">
           <div class="brand-copy">
-            <div class="brand-title">新型技改城市平台</div>
+            <div class="brand-title">新型技改城市试点平台</div>
           </div>
         </div>
 

@@ -1,4 +1,4 @@
-# 新型技改城市平台（首版）
+# 新型技改城市试点平台（首版）
 
 后端：Spring Boot 3 + MySQL 8 + JWT + RBAC  
 前端：Vue3 + Vite + Element Plus

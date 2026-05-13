@@ -377,7 +377,7 @@ public class SubmissionService {
         basic.setEnterpriseName(enterprise.getEnterpriseName());
         basic.setCreditCode(enterprise.getCreditCode());
         basic.setUnitNature(enterprise.getUnitNature());
-        basic.setAddress(enterprise.getAddress());
+        basic.setAddress(null);
         basic.setEstablishedAt(enterprise.getEstablishedAt());
         basic.setRegisterCapital(enterprise.getRegisterCapital());
         basic.setLegalPerson(enterprise.getLegalPerson());
@@ -402,7 +402,7 @@ public class SubmissionService {
         basic.setEnterpriseName(enterprise.getEnterpriseName());
         basic.setCreditCode(enterprise.getCreditCode());
         basic.setUnitNature(enterprise.getUnitNature());
-        basic.setAddress(enterprise.getAddress());
+        basic.setAddress(null);
         basic.setEstablishedAt(enterprise.getEstablishedAt());
         basic.setRegisterCapital(enterprise.getRegisterCapital());
         basic.setLegalPerson(enterprise.getLegalPerson());

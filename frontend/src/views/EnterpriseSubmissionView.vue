@@ -9,7 +9,7 @@
           <el-col :span="12"><el-form-item label="统一信用代码"><el-input v-model="form.basicInfo.creditCode" :disabled="!editable"/></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="所属行业代码" required><el-input v-model="form.basicInfo.industryCode" :disabled="!editable"/></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="所属行业名称"><el-input v-model="form.basicInfo.industryName" :disabled="!editable"/></el-form-item></el-col>
-          <el-col :span="12"><el-form-item label="企业地址"><el-input v-model="form.basicInfo.address" :disabled="!editable"/></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="联系人及电话" required><el-input v-model="form.basicInfo.address" :disabled="!editable" placeholder="示例：张三/18812345678"/></el-form-item></el-col>
         </el-row>
       </section>
 
@@ -906,6 +906,9 @@ const validateRequiredBasicInfo = () => {
   }
   if (!`${form.basicInfo.industryCode || ''}`.trim()) {
     missing.push('所属行业代码')
+  }
+  if (!`${form.basicInfo.address || ''}`.trim()) {
+    missing.push('联系人及电话')
   }
   if (missing.length > 0) {
     ElMessage.warning(`请先填写必填项：${missing.join('、')}`)

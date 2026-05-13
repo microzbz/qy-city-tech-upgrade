@@ -361,7 +361,7 @@ public class SubmissionExportService {
             .append(".list{white-space:pre-wrap;} .muted{color:#666;} ")
             .append("</style></head><body>");
 
-        html.append("<h1>新型技改城市平台企业填报导出</h1>");
+        html.append("<h1>新型技改城市试点平台企业填报导出</h1>");
         html.append("<div class='meta'>")
             .append("企业编号: ").append(safe(exportCode))
             .append("　　企业名称: ").append(enterpriseName)
@@ -370,7 +370,7 @@ public class SubmissionExportService {
 
         html.append("<h2>基本信息</h2><table>");
         appendRow(html, "企业名称", safe(basic == null ? null : basic.getEnterpriseName()), "统一社会信用代码", safe(basic == null ? null : basic.getCreditCode()));
-        appendRow(html, "单位性质", safe(basic == null ? null : basic.getUnitNature()), "地址", safe(basic == null ? null : basic.getAddress()));
+        appendRow(html, "单位性质", safe(basic == null ? null : basic.getUnitNature()), "联系人及电话", safe(basic == null ? null : basic.getAddress()));
         appendRow(html, "成立时间", safeDate(basic == null ? null : basic.getEstablishedAt()), "注册资本(万元)", safeDecimal(basic == null ? null : basic.getRegisterCapital()));
         appendRow(html, "法人代表", safe(basic == null ? null : basic.getLegalPerson()), "主营产品", safe(basic == null ? null : basic.getMainProduct()));
         appendRow(html, "职工人数", safeNumber(basic == null ? null : basic.getEmployeeCount()), "所属行业代码", safe(basic == null ? null : basic.getIndustryCode()));
@@ -540,7 +540,7 @@ public class SubmissionExportService {
             "审批意见",
             "所属行业代码",
             "所属行业名称",
-            "企业地址",
+            "联系人及电话",
             "主要工序",
             "工序-设备对应",
             "信息化设备",

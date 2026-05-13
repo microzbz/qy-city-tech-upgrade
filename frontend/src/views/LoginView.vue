@@ -2,7 +2,7 @@
   <div class="login-page">
     <div class="login-shell">
       <div class="login-left">
-        <h1>新型技改城市平台</h1>
+        <h1>新型技改城市试点平台</h1>
         <p>企业技术改造填报系统</p>
       </div>
       <div class="login-card">
