@@ -198,7 +198,9 @@ public class SubmissionService {
         SubmissionForm form = submissionFormRepository.findById(id).orElseThrow(() -> new BizException("填报单不存在"));
         if (currentUser.getRoles().contains("ENTERPRISE_USER")) {
             assertOwner(form, requireEnterpriseId(currentUser));
-        } else if (currentUser.getRoles().contains("APPROVER_ADMIN") || currentUser.getRoles().contains("SYS_ADMIN")) {
+        } else if (currentUser.getRoles().contains("APPROVER_ADMIN")
+            || currentUser.getRoles().contains("SYS_ADMIN")
+            || currentUser.getRoles().contains("TOWN_MONITOR")) {
             approvalDataScopeService.assertCanAccessSubmission(form, currentUser);
         } else {
             throw new BizException("无权查看该填报单");

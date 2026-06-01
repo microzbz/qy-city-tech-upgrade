@@ -77,8 +77,8 @@
       <el-table-column label="操作" width="260" fixed="right">
         <template #default="{ row }">
           <el-button type="primary" link @click="viewSubmission(row.submissionId)">查看</el-button>
-          <el-button v-if="['APPROVED', 'RETURNED', 'REJECTED'].includes(row.status)" type="warning" link @click="editSubmission(row.submissionId)">编辑</el-button>
-          <el-button v-if="row.status === 'APPROVED'" type="danger" link @click="returnSubmission(row)">退回企业</el-button>
+          <el-button v-if="!isTownMonitor && ['APPROVED', 'RETURNED', 'REJECTED'].includes(row.status)" type="warning" link @click="editSubmission(row.submissionId)">编辑</el-button>
+          <el-button v-if="!isTownMonitor && row.status === 'APPROVED'" type="danger" link @click="returnSubmission(row)">退回企业</el-button>
           <el-button type="success" link :disabled="polling || !row.exportable" @click="startExport([row])">导出</el-button>
         </template>
       </el-table-column>
@@ -139,10 +139,13 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import http from '../api/http'
 import { formatDateTime } from '../utils/datetime'
+import { useAuthStore } from '../stores/auth'
 
 const rows = ref([])
 const selectedRows = ref([])
 const router = useRouter()
+const auth = useAuthStore()
+const isTownMonitor = computed(() => auth.roles.includes('TOWN_MONITOR') && !auth.roles.includes('APPROVER_ADMIN') && !auth.roles.includes('SYS_ADMIN'))
 const jobDialogVisible = ref(false)
 const job = ref(null)
 const polling = ref(false)

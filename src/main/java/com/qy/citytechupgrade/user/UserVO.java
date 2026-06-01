@@ -16,6 +16,7 @@ public class UserVO {
     private UserStatus status;
     private Long enterpriseId;
     private String enterpriseCodeFirstDigitScope;
+    private String townStreetCodeScope;
     private LocalDateTime lastLoginAt;
     private List<String> roleCodes;
 
@@ -27,6 +28,7 @@ public class UserVO {
             .status(user.getStatus())
             .enterpriseId(user.getEnterpriseId())
             .enterpriseCodeFirstDigitScope(user.getEnterpriseCodeFirstDigitScope())
+            .townStreetCodeScope(user.getTownStreetCodeScope())
             .lastLoginAt(user.getLastLoginAt())
             .roleCodes(roles)
             .build();

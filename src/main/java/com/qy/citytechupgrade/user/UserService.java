@@ -4,6 +4,7 @@ import com.qy.citytechupgrade.common.dto.PagedResult;
 import com.qy.citytechupgrade.common.enums.RoleCode;
 import com.qy.citytechupgrade.common.enums.UserStatus;
 import com.qy.citytechupgrade.common.exception.BizException;
+import com.qy.citytechupgrade.common.town.TownStreetCodeCatalog;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -72,6 +73,11 @@ public class UserService {
             menus.add(menu("audit", "审计日志", "/admin/audit-logs"));
             menus.add(menu("notices", "我的消息", "/common/notices"));
         }
+        if (set.contains("TOWN_MONITOR")) {
+            menus.add(menu("approval-todo", "待审批", "/approvals/todo"));
+            menus.add(menu("approval-done", "已审批", "/approvals/done"));
+            menus.add(menu("notices", "我的消息", "/common/notices"));
+        }
         if (set.contains("SYS_ADMIN")) {
             menus.add(menu("users", "用户管理", "/admin/users"));
             menus.add(menu("industry-mappings", "行业映射", "/admin/industry-mappings"));
@@ -126,6 +132,7 @@ public class UserService {
         user.setDisplayName(request.getDisplayName());
         user.setEnterpriseId(request.getEnterpriseId());
         user.setEnterpriseCodeFirstDigitScope(normalizeEnterpriseCodeFirstDigitScope(request.getEnterpriseCodeFirstDigitScope(), request.getRoleCodes()));
+        user.setTownStreetCodeScope(normalizeTownStreetCodeScope(request.getTownStreetCodeScope(), request.getRoleCodes()));
         user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
         user.setStatus(UserStatus.ACTIVE);
         sysUserRepository.save(user);
@@ -144,6 +151,10 @@ public class UserService {
             request.getEnterpriseCodeFirstDigitScope(),
             getRoleCodesByUserId(userId)
         ));
+        user.setTownStreetCodeScope(normalizeTownStreetCodeScope(
+            request.getTownStreetCodeScope(),
+            getRoleCodesByUserId(userId)
+        ));
         if (request.getPassword() != null && !request.getPassword().isBlank()) {
             user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
         }
@@ -153,6 +164,11 @@ public class UserService {
 
     @Transactional
     public void assignRoles(Long userId, List<String> roleCodes) {
+        assignRoles(userId, roleCodes, null, null);
+    }
+
+    @Transactional
+    public void assignRoles(Long userId, List<String> roleCodes, String enterpriseCodeFirstDigitScope, String townStreetCodeScope) {
         SysUser user = sysUserRepository.findById(userId).orElseThrow(() -> new BizException("用户不存在"));
         List<String> normalizedRoleCodes = roleCodes == null ? List.of() : roleCodes.stream()
             .filter(StringUtils::hasText)
@@ -169,7 +185,14 @@ public class UserService {
 
         sysUserRoleRepository.deleteByUserId(user.getId());
         sysUserRoleRepository.flush();
-        user.setEnterpriseCodeFirstDigitScope(normalizeEnterpriseCodeFirstDigitScope(user.getEnterpriseCodeFirstDigitScope(), normalizedRoleCodes));
+        String nextEnterpriseScope = enterpriseCodeFirstDigitScope != null
+            ? enterpriseCodeFirstDigitScope
+            : user.getEnterpriseCodeFirstDigitScope();
+        String nextTownScope = townStreetCodeScope != null
+            ? townStreetCodeScope
+            : user.getTownStreetCodeScope();
+        user.setEnterpriseCodeFirstDigitScope(normalizeEnterpriseCodeFirstDigitScope(nextEnterpriseScope, normalizedRoleCodes));
+        user.setTownStreetCodeScope(normalizeTownStreetCodeScope(nextTownScope, normalizedRoleCodes));
         sysUserRepository.save(user);
         for (SysRole role : roles) {
             SysUserRole ur = new SysUserRole();
@@ -205,6 +228,24 @@ public class UserService {
         String normalized = value.trim();
         if (normalized.length() > 1) {
             throw new BizException("管理企业第一位编码只能填写1位");
+        }
+        return normalized;
+    }
+
+    private String normalizeTownStreetCodeScope(String value, List<String> roleCodes) {
+        boolean isTownMonitor = roleCodes != null && roleCodes.stream()
+            .filter(StringUtils::hasText)
+            .map(String::trim)
+            .anyMatch(RoleCode.TOWN_MONITOR.name()::equals);
+        if (!isTownMonitor) {
+            return null;
+        }
+        if (!StringUtils.hasText(value)) {
+            throw new BizException("镇街账号必须填写镇街编号");
+        }
+        String normalized = TownStreetCodeCatalog.normalizeCode(value);
+        if (!TownStreetCodeCatalog.isValidCode(normalized)) {
+            throw new BizException("镇街编号不存在");
         }
         return normalized;
     }

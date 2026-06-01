@@ -40,7 +40,7 @@ app:
     qf:
       enabled: true
       base-url: "https://try.dg.gov.cn/dgecsp/webapi/api/"
-      policy-name: "新型技改城市试点平台"
+      policy-name: "新型技改城市平台"
       policy-pwd: srhkbybw
       enterprise-api-name: enterprisePortrait
       sso-api-name: getUserInfoByToken
@@ -53,7 +53,7 @@ app:
     msg-center:
       enabled: true
       base-url: "${APP_MSG_CENTER_BASE_URL:http://zwfw.dg.gov.cn/api/}"
-      policy-name: "${APP_MSG_CENTER_POLICY_NAME:新型技改城市试点平台}"
+      policy-name: "${APP_MSG_CENTER_POLICY_NAME:新型技改城市平台}"
       policy-pwd: "${APP_MSG_CENTER_POLICY_PWD:zsetyxvp}"
       send-api-name: msgCentreSend
       send-result-api-name: msgCentreSendResult

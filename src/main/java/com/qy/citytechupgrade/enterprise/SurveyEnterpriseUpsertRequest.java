@@ -12,6 +12,9 @@ public class SurveyEnterpriseUpsertRequest {
     @Size(max = 100, message = "所属镇街园区长度不能超过100")
     private String townPark;
 
+    @Size(max = 2, message = "镇街编号长度不能超过2")
+    private String townStreetCode;
+
     @NotBlank(message = "企业名称不能为空")
     @Size(max = 255, message = "企业名称长度不能超过255")
     private String enterpriseName;

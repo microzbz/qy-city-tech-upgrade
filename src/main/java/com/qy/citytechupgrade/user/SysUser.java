@@ -35,6 +35,9 @@ public class SysUser {
     @Column(name = "enterprise_code_first_digit_scope", length = 1)
     private String enterpriseCodeFirstDigitScope;
 
+    @Column(name = "town_street_code_scope", length = 2)
+    private String townStreetCodeScope;
+
     @Column(name = "last_login_at")
     private LocalDateTime lastLoginAt;
 

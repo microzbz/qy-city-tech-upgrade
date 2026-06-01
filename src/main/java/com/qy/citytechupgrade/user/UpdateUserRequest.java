@@ -17,4 +17,5 @@ public class UpdateUserRequest {
 
     private Long enterpriseId;
     private String enterpriseCodeFirstDigitScope;
+    private String townStreetCodeScope;
 }

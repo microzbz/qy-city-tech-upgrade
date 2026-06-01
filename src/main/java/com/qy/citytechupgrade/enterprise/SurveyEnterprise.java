@@ -24,6 +24,9 @@ public class SurveyEnterprise {
     @Column(name = "town_park", nullable = false, length = 100)
     private String townPark;
 
+    @Column(name = "town_street_code", length = 2)
+    private String townStreetCode;
+
     @Column(name = "enterprise_name", nullable = false, length = 255)
     private String enterpriseName;
 

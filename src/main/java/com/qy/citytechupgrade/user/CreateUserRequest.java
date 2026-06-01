@@ -18,5 +18,6 @@ public class CreateUserRequest {
 
     private Long enterpriseId;
     private String enterpriseCodeFirstDigitScope;
+    private String townStreetCodeScope;
     private List<String> roleCodes;
 }

@@ -7,4 +7,6 @@ import java.util.List;
 @Data
 public class AssignRoleRequest {
     private List<String> roleCodes;
+    private String enterpriseCodeFirstDigitScope;
+    private String townStreetCodeScope;
 }

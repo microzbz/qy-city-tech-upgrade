@@ -20,6 +20,9 @@
     <el-table :data="rows" border v-loading="loading" style="margin-top: 10px">
       <el-table-column prop="id" label="ID" width="80" />
       <el-table-column prop="townPark" label="镇街园区" min-width="160" />
+      <el-table-column prop="townStreetCode" label="镇街编号" width="110">
+        <template #default="scope">{{ townCodeLabel(scope.row.townStreetCode) }}</template>
+      </el-table-column>
       <el-table-column prop="enterpriseName" label="企业名称" min-width="280" />
       <el-table-column prop="industryCode" label="行业代码" width="120" />
       <el-table-column prop="enterpriseCodeFirstDigit" label="编码1位" width="90" />
@@ -53,6 +56,21 @@
       <el-form ref="formRef" :model="form" :rules="rules" label-width="130px">
         <el-form-item label="镇街园区" prop="townPark">
           <el-input v-model="form.townPark" maxlength="100" show-word-limit />
+        </el-form-item>
+        <el-form-item label="镇街编号">
+          <el-select
+            v-model="form.townStreetCode"
+            filterable
+            clearable
+            placeholder="请选择镇街编号"
+          >
+            <el-option
+              v-for="item in townCodes"
+              :key="item.code"
+              :label="`${item.code} ${item.name}`"
+              :value="item.code"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="企业名称" prop="enterpriseName">
           <el-input v-model="form.enterpriseName" maxlength="255" show-word-limit />
@@ -88,6 +106,7 @@ import http from '../api/http'
 
 const loading = ref(false)
 const rows = ref([])
+const townCodes = ref([])
 const dialogVisible = ref(false)
 const editId = ref(null)
 const formRef = ref()
@@ -107,6 +126,7 @@ const pager = reactive({
 
 const form = reactive({
   townPark: '',
+  townStreetCode: '',
   enterpriseName: '',
   industryCode: '',
   enterpriseCodeFirstDigit: '',
@@ -133,6 +153,7 @@ const cleanParams = (obj) => {
 
 const cleanPayload = () => cleanParams({
   townPark: form.townPark,
+  townStreetCode: form.townStreetCode,
   enterpriseName: form.enterpriseName,
   industryCode: form.industryCode,
   enterpriseCodeFirstDigit: form.enterpriseCodeFirstDigit,
@@ -146,14 +167,26 @@ const formatDateTime = (v) => {
   return `${v}`.replace('T', ' ')
 }
 
+const townCodeLabel = (code) => {
+  if (!code) return '-'
+  const matched = townCodes.value.find((item) => item.code === code)
+  return matched ? `${matched.code} ${matched.name}` : code
+}
+
 const resetForm = () => {
   form.townPark = ''
+  form.townStreetCode = ''
   form.enterpriseName = ''
   form.industryCode = ''
   form.enterpriseCodeFirstDigit = ''
   form.enterpriseCodeTownDigits = ''
   form.enterpriseCodeIndustryDigits = ''
   form.enterpriseCodeSequenceDigits = ''
+}
+
+const loadTownCodes = async () => {
+  const res = await http.get('/town-street-codes')
+  townCodes.value = res.data || []
 }
 
 const load = async () => {
@@ -202,6 +235,7 @@ const openCreate = () => {
 const openEdit = (row) => {
   editId.value = row.id
   form.townPark = row.townPark || ''
+  form.townStreetCode = row.townStreetCode || ''
   form.enterpriseName = row.enterpriseName || ''
   form.industryCode = row.industryCode || ''
   form.enterpriseCodeFirstDigit = row.enterpriseCodeFirstDigit || ''
@@ -253,5 +287,8 @@ const onPageChange = async () => {
   await load()
 }
 
-onMounted(load)
+onMounted(async () => {
+  await loadTownCodes()
+  await load()
+})
 </script>

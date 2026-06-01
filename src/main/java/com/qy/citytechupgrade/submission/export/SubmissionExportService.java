@@ -984,7 +984,9 @@ public class SubmissionExportService {
     }
 
     private void assertApprover(CurrentUser currentUser) {
-        if (currentUser == null || (!currentUser.getRoles().contains("APPROVER_ADMIN") && !currentUser.getRoles().contains("SYS_ADMIN"))) {
+        if (currentUser == null || (!currentUser.getRoles().contains("APPROVER_ADMIN")
+            && !currentUser.getRoles().contains("SYS_ADMIN")
+            && !currentUser.getRoles().contains("TOWN_MONITOR"))) {
             throw new BizException("无权限执行导出操作");
         }
     }

@@ -212,7 +212,9 @@ public class FileService {
         if (currentUser.getRoles().contains("ENTERPRISE_USER") && !form.getEnterpriseId().equals(currentUser.getEnterpriseId())) {
             throw new BizException("无权限访问该附件");
         }
-        if (currentUser.getRoles().contains("APPROVER_ADMIN") || currentUser.getRoles().contains("SYS_ADMIN")) {
+        if (currentUser.getRoles().contains("APPROVER_ADMIN")
+            || currentUser.getRoles().contains("SYS_ADMIN")
+            || currentUser.getRoles().contains("TOWN_MONITOR")) {
             approvalDataScopeService.assertCanAccessSubmission(form, currentUser);
         } else if (!currentUser.getRoles().contains("ENTERPRISE_USER")) {
             throw new BizException("无权限访问该附件");

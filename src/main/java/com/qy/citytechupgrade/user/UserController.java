@@ -46,7 +46,12 @@ public class UserController {
     @PutMapping("/users/{id}/roles")
     @PreAuthorize("hasRole('SYS_ADMIN')")
     public ApiResponse<String> assignRoles(@PathVariable Long id, @RequestBody AssignRoleRequest request) {
-        userService.assignRoles(id, request.getRoleCodes());
+        userService.assignRoles(
+            id,
+            request.getRoleCodes(),
+            request.getEnterpriseCodeFirstDigitScope(),
+            request.getTownStreetCodeScope()
+        );
         auditService.log(SecurityUtils.currentUserId(), "USER", "ASSIGN_ROLE", String.valueOf(id),
             "角色=" + (request.getRoleCodes() == null ? "[]" : request.getRoleCodes()));
         return ApiResponse.success("角色更新成功", "OK");

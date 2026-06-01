@@ -37,6 +37,8 @@ import java.util.Locale;
 @Slf4j
 @RequiredArgsConstructor
 public class ApprovalService {
+    private static final String TOWN_MONITOR_ROLE = "TOWN_MONITOR";
+
     private final WfInstanceRepository wfInstanceRepository;
     private final WfTaskRepository wfTaskRepository;
     private final WorkflowService workflowService;
@@ -119,7 +121,7 @@ public class ApprovalService {
         CurrentUser currentUser
     ) {
         List<WfTask> tasks;
-        if (currentUser.getRoles().contains("SYS_ADMIN")) {
+        if (currentUser.getRoles().contains("SYS_ADMIN") || currentUser.getRoles().contains(TOWN_MONITOR_ROLE)) {
             tasks = wfTaskRepository.findByStatusOrderByUpdatedAtDesc(TaskStatus.TODO);
         } else {
             tasks = wfTaskRepository.findByStatusAndRoleCodeInOrderByCreatedAtDesc(TaskStatus.TODO, currentUser.getRoles().stream().toList());
@@ -143,7 +145,7 @@ public class ApprovalService {
 
     public List<ApprovalTaskVO> done(CurrentUser currentUser) {
         List<WfTask> tasks;
-        if (currentUser.getRoles().contains("SYS_ADMIN")) {
+        if (currentUser.getRoles().contains("SYS_ADMIN") || currentUser.getRoles().contains(TOWN_MONITOR_ROLE)) {
             tasks = wfTaskRepository.findByStatusOrderByUpdatedAtDesc(TaskStatus.DONE);
         } else {
             tasks = wfTaskRepository.findByStatusAndRoleCodeInOrderByCreatedAtDesc(TaskStatus.DONE, currentUser.getRoles().stream().toList());
@@ -156,7 +158,9 @@ public class ApprovalService {
 
     public ApprovalTaskVO detail(Long taskId, CurrentUser currentUser) {
         WfTask task = wfTaskRepository.findById(taskId).orElseThrow(() -> new BizException("审批任务不存在"));
-        if (!currentUser.getRoles().contains("SYS_ADMIN") && !currentUser.getRoles().contains(task.getRoleCode())) {
+        if (!currentUser.getRoles().contains("SYS_ADMIN")
+            && !currentUser.getRoles().contains(TOWN_MONITOR_ROLE)
+            && !currentUser.getRoles().contains(task.getRoleCode())) {
             throw new BizException("无权查看该审批任务");
         }
         assertCanAccessTask(task, currentUser);

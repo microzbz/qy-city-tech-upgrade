@@ -28,7 +28,7 @@ public class SubmissionExportController {
     private final SubmissionExportService submissionExportService;
 
     @GetMapping("/approved-list")
-    @PreAuthorize("hasAnyRole('APPROVER_ADMIN','SYS_ADMIN')")
+    @PreAuthorize("hasAnyRole('APPROVER_ADMIN','SYS_ADMIN','TOWN_MONITOR')")
     public ApiResponse<PagedResult<ApprovedSubmissionListItemVO>> approvedList(
         @RequestParam(required = false) String companyName,
         @RequestParam(required = false) String status,
@@ -43,19 +43,19 @@ public class SubmissionExportController {
     }
 
     @PostMapping("/jobs")
-    @PreAuthorize("hasAnyRole('APPROVER_ADMIN','SYS_ADMIN')")
+    @PreAuthorize("hasAnyRole('APPROVER_ADMIN','SYS_ADMIN','TOWN_MONITOR')")
     public ApiResponse<ApprovedSubmissionExportJobVO> createJob(@RequestBody @Valid ApprovedSubmissionExportRequest request) {
         return ApiResponse.success(submissionExportService.createJob(request, SecurityUtils.currentUser()));
     }
 
     @GetMapping("/jobs/{jobId}")
-    @PreAuthorize("hasAnyRole('APPROVER_ADMIN','SYS_ADMIN')")
+    @PreAuthorize("hasAnyRole('APPROVER_ADMIN','SYS_ADMIN','TOWN_MONITOR')")
     public ApiResponse<ApprovedSubmissionExportJobVO> jobDetail(@PathVariable String jobId) {
         return ApiResponse.success(submissionExportService.getJob(jobId, SecurityUtils.currentUser()));
     }
 
     @GetMapping("/jobs/{jobId}/download")
-    @PreAuthorize("hasAnyRole('APPROVER_ADMIN','SYS_ADMIN')")
+    @PreAuthorize("hasAnyRole('APPROVER_ADMIN','SYS_ADMIN','TOWN_MONITOR')")
     public ResponseEntity<InputStreamResource> download(@PathVariable String jobId) throws IOException {
         SubmissionExportService.ExportDownloadFile file = submissionExportService.download(jobId, SecurityUtils.currentUser());
         return ResponseEntity.ok()
@@ -69,7 +69,7 @@ public class SubmissionExportController {
     }
 
     @GetMapping("/report")
-    @PreAuthorize("hasAnyRole('APPROVER_ADMIN','SYS_ADMIN')")
+    @PreAuthorize("hasAnyRole('APPROVER_ADMIN','SYS_ADMIN','TOWN_MONITOR')")
     public ResponseEntity<InputStreamResource> downloadReport(
         @RequestParam(required = false) String companyName,
         @RequestParam(required = false) String status,

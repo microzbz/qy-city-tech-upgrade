@@ -34,13 +34,15 @@
       </el-table-column>
       <el-table-column prop="nodeName" label="节点" width="140"/>
       <el-table-column prop="roleCode" label="审批角色" width="160"/>
-      <el-table-column label="操作" width="340">
+      <el-table-column label="操作" :width="isTownMonitor ? 100 : 340">
         <template #default="scope">
           <el-button type="primary" link @click="viewSubmission(scope.row.submissionId, scope.row.taskId)">查看</el-button>
-          <el-button type="warning" link @click="editSubmission(scope.row.submissionId, scope.row.taskId)">编辑</el-button>
-          <el-button type="success" link @click="act(scope.row, 'approve')">通过</el-button>
-          <el-button type="danger" link @click="act(scope.row, 'reject')">驳回</el-button>
-          <el-button type="warning" link @click="act(scope.row, 'return')">退回</el-button>
+          <template v-if="!isTownMonitor">
+            <el-button type="warning" link @click="editSubmission(scope.row.submissionId, scope.row.taskId)">编辑</el-button>
+            <el-button type="success" link @click="act(scope.row, 'approve')">通过</el-button>
+            <el-button type="danger" link @click="act(scope.row, 'reject')">驳回</el-button>
+            <el-button type="warning" link @click="act(scope.row, 'return')">退回</el-button>
+          </template>
         </template>
       </el-table-column>
     </el-table>
@@ -59,14 +61,17 @@
 </template>
 
 <script setup>
-import { reactive, ref, onMounted } from 'vue'
+import { computed, reactive, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import http from '../api/http'
 import { formatDateTime } from '../utils/datetime'
+import { useAuthStore } from '../stores/auth'
 
 const rows = ref([])
 const router = useRouter()
+const auth = useAuthStore()
+const isTownMonitor = computed(() => auth.roles.includes('TOWN_MONITOR') && !auth.roles.includes('APPROVER_ADMIN') && !auth.roles.includes('SYS_ADMIN'))
 const pageSizeOptions = [10, 20, 50, 100]
 const query = reactive({
   documentNo: '',

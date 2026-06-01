@@ -20,7 +20,7 @@ public class ApprovalController {
     private final ApprovalService approvalService;
 
     @GetMapping("/todo")
-    @PreAuthorize("hasAnyRole('APPROVER_ADMIN','SYS_ADMIN')")
+    @PreAuthorize("hasAnyRole('APPROVER_ADMIN','SYS_ADMIN','TOWN_MONITOR')")
     public ApiResponse<PagedResult<ApprovalTaskVO>> todo(
         @RequestParam(required = false) String documentNo,
         @RequestParam(required = false) String enterpriseName,
@@ -35,13 +35,13 @@ public class ApprovalController {
     }
 
     @GetMapping("/done")
-    @PreAuthorize("hasAnyRole('APPROVER_ADMIN','SYS_ADMIN')")
+    @PreAuthorize("hasAnyRole('APPROVER_ADMIN','SYS_ADMIN','TOWN_MONITOR')")
     public ApiResponse<List<ApprovalTaskVO>> done() {
         return ApiResponse.success(approvalService.done(SecurityUtils.currentUser()));
     }
 
     @GetMapping("/{taskId}")
-    @PreAuthorize("hasAnyRole('APPROVER_ADMIN','SYS_ADMIN')")
+    @PreAuthorize("hasAnyRole('APPROVER_ADMIN','SYS_ADMIN','TOWN_MONITOR')")
     public ApiResponse<ApprovalTaskVO> detail(@PathVariable Long taskId) {
         return ApiResponse.success(approvalService.detail(taskId, SecurityUtils.currentUser()));
     }

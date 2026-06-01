@@ -2,6 +2,7 @@ package com.qy.citytechupgrade.enterprise;
 
 import com.qy.citytechupgrade.common.dto.PagedResult;
 import com.qy.citytechupgrade.common.exception.BizException;
+import com.qy.citytechupgrade.common.town.TownStreetCodeCatalog;
 import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -64,6 +65,7 @@ public class SurveyEnterpriseService {
 
     private void apply(SurveyEnterprise entity, SurveyEnterpriseUpsertRequest request) {
         entity.setTownPark(normalizeRequired(request.getTownPark(), "所属镇街园区不能为空", 100));
+        entity.setTownStreetCode(normalizeTownStreetCode(request.getTownStreetCode()));
         entity.setEnterpriseName(normalizeRequired(request.getEnterpriseName(), "企业名称不能为空", 255));
         entity.setIndustryCode(normalizeOptional(request.getIndustryCode(), 20));
         entity.setEnterpriseCodeFirstDigit(normalizeOptional(request.getEnterpriseCodeFirstDigit(), 1));
@@ -104,6 +106,17 @@ public class SurveyEnterpriseService {
         }
         String normalized = value.trim();
         return normalized.length() <= maxLen ? normalized : normalized.substring(0, maxLen);
+    }
+
+    private String normalizeTownStreetCode(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        String normalized = TownStreetCodeCatalog.normalizeCode(value);
+        if (!TownStreetCodeCatalog.isValidCode(normalized)) {
+            throw new BizException("镇街编号不存在");
+        }
+        return normalized;
     }
 
     private Integer normalizeSourceRowNo(Integer sourceRowNo) {
