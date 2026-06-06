@@ -5,42 +5,72 @@ import com.qy.citytechupgrade.enterprise.EnterpriseProfile;
 import com.qy.citytechupgrade.enterprise.EnterpriseProfileRepository;
 import com.qy.citytechupgrade.enterprise.SurveyEnterprise;
 import com.qy.citytechupgrade.enterprise.SurveyEnterpriseRepository;
+import com.qy.citytechupgrade.submission.SubmissionBasicInfo;
 import com.qy.citytechupgrade.submission.SubmissionBasicInfoRepository;
 import com.qy.citytechupgrade.submission.SubmissionForm;
 import com.qy.citytechupgrade.submission.SubmissionFormRepository;
 import com.qy.citytechupgrade.user.SysUser;
 import com.qy.citytechupgrade.user.SysUserRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
 class ApprovalDataScopeServiceTest {
-    @Mock
-    private SysUserRepository sysUserRepository;
-
-    @Mock
-    private SubmissionFormRepository submissionFormRepository;
-
-    @Mock
-    private SubmissionBasicInfoRepository submissionBasicInfoRepository;
-
-    @Mock
-    private EnterpriseProfileRepository enterpriseProfileRepository;
-
-    @Mock
-    private SurveyEnterpriseRepository surveyEnterpriseRepository;
-
-    @InjectMocks
+    private Map<Long, SysUser> users;
+    private Map<Long, SubmissionForm> submissions;
+    private Map<Long, SubmissionBasicInfo> basicInfos;
+    private Map<Long, EnterpriseProfile> enterpriseProfiles;
+    private Map<String, SurveyEnterprise> surveyEnterprises;
     private ApprovalDataScopeService approvalDataScopeService;
+
+    @BeforeEach
+    void setUp() {
+        users = new HashMap<>();
+        submissions = new HashMap<>();
+        basicInfos = new HashMap<>();
+        enterpriseProfiles = new HashMap<>();
+        surveyEnterprises = new HashMap<>();
+        approvalDataScopeService = new ApprovalDataScopeService(
+            repository(SysUserRepository.class, (method, args) -> {
+                if ("findById".equals(method.getName())) {
+                    return Optional.ofNullable(users.get(args[0]));
+                }
+                throw unexpected(method);
+            }),
+            repository(SubmissionFormRepository.class, (method, args) -> {
+                if ("findById".equals(method.getName())) {
+                    return Optional.ofNullable(submissions.get(args[0]));
+                }
+                throw unexpected(method);
+            }),
+            repository(SubmissionBasicInfoRepository.class, (method, args) -> {
+                if ("findBySubmissionId".equals(method.getName())) {
+                    return Optional.ofNullable(basicInfos.get(args[0]));
+                }
+                throw unexpected(method);
+            }),
+            repository(EnterpriseProfileRepository.class, (method, args) -> {
+                if ("findById".equals(method.getName())) {
+                    return Optional.ofNullable(enterpriseProfiles.get(args[0]));
+                }
+                throw unexpected(method);
+            }),
+            repository(SurveyEnterpriseRepository.class, (method, args) -> {
+                if ("findFirstByEnterpriseNameOrderByIdAsc".equals(method.getName())) {
+                    return Optional.ofNullable(surveyEnterprises.get(args[0]));
+                }
+                throw unexpected(method);
+            })
+        );
+    }
 
     @Test
     void scopedApproverCanAccessMatchingFirstDigit() {
@@ -79,9 +109,7 @@ class ApprovalDataScopeServiceTest {
         EnterpriseProfile profile = new EnterpriseProfile();
         profile.setId(20L);
         profile.setEnterpriseName("企业C");
-        when(enterpriseProfileRepository.findById(20L)).thenReturn(Optional.of(profile));
-        when(surveyEnterpriseRepository.findFirstByEnterpriseNameOrderByIdAsc("企业C")).thenReturn(Optional.empty());
-        when(submissionBasicInfoRepository.findBySubmissionId(10L)).thenReturn(Optional.empty());
+        enterpriseProfiles.put(20L, profile);
 
         assertThat(approvalDataScopeService.canAccessSubmission(form, currentUser)).isFalse();
     }
@@ -111,27 +139,28 @@ class ApprovalDataScopeServiceTest {
     }
 
     private CurrentUser townMonitorUser() {
-        return new CurrentUser(2L, "cs_monitor", "茶山镇查阅账号", null, Set.of("TOWN_MONITOR"));
+        return new CurrentUser(2L, "cs_monitor", "cs_monitor", null, Set.of("TOWN_MONITOR"));
     }
 
     private void mockScopeUser(String scope) {
         SysUser user = new SysUser();
         user.setId(1L);
         user.setEnterpriseCodeFirstDigitScope(scope);
-        when(sysUserRepository.findById(1L)).thenReturn(Optional.of(user));
+        users.put(1L, user);
     }
 
     private void mockTownMonitorUser(String townStreetCode) {
         SysUser user = new SysUser();
         user.setId(2L);
         user.setTownStreetCodeScope(townStreetCode);
-        when(sysUserRepository.findById(2L)).thenReturn(Optional.of(user));
+        users.put(2L, user);
     }
 
     private SubmissionForm submissionForm(Long id, Long enterpriseId) {
         SubmissionForm form = new SubmissionForm();
         form.setId(id);
         form.setEnterpriseId(enterpriseId);
+        submissions.put(id, form);
         return form;
     }
 
@@ -139,25 +168,55 @@ class ApprovalDataScopeServiceTest {
         EnterpriseProfile profile = new EnterpriseProfile();
         profile.setId(enterpriseId);
         profile.setEnterpriseName(enterpriseName);
-        when(enterpriseProfileRepository.findById(enterpriseId)).thenReturn(Optional.of(profile));
+        enterpriseProfiles.put(enterpriseId, profile);
 
         SurveyEnterprise surveyEnterprise = new SurveyEnterprise();
         surveyEnterprise.setEnterpriseName(enterpriseName);
         surveyEnterprise.setEnterpriseCodeFirstDigit(firstDigit);
-        when(surveyEnterpriseRepository.findFirstByEnterpriseNameOrderByIdAsc(enterpriseName))
-            .thenReturn(Optional.of(surveyEnterprise));
+        surveyEnterprises.put(enterpriseName, surveyEnterprise);
     }
 
     private void mockEnterpriseTownStreetCode(Long enterpriseId, String enterpriseName, String townStreetCode) {
         EnterpriseProfile profile = new EnterpriseProfile();
         profile.setId(enterpriseId);
         profile.setEnterpriseName(enterpriseName);
-        when(enterpriseProfileRepository.findById(enterpriseId)).thenReturn(Optional.of(profile));
+        enterpriseProfiles.put(enterpriseId, profile);
 
         SurveyEnterprise surveyEnterprise = new SurveyEnterprise();
         surveyEnterprise.setEnterpriseName(enterpriseName);
         surveyEnterprise.setTownStreetCode(townStreetCode);
-        when(surveyEnterpriseRepository.findFirstByEnterpriseNameOrderByIdAsc(enterpriseName))
-            .thenReturn(Optional.of(surveyEnterprise));
+        surveyEnterprises.put(enterpriseName, surveyEnterprise);
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> T repository(Class<T> repositoryType, RepositoryCall call) {
+        return (T) Proxy.newProxyInstance(
+            repositoryType.getClassLoader(),
+            new Class<?>[] {repositoryType},
+            (proxy, method, args) -> {
+                if (method.getDeclaringClass() == Object.class) {
+                    return objectMethod(proxy, method, args, repositoryType);
+                }
+                return call.invoke(method, args == null ? new Object[0] : args);
+            }
+        );
+    }
+
+    private Object objectMethod(Object proxy, Method method, Object[] args, Class<?> repositoryType) {
+        return switch (method.getName()) {
+            case "toString" -> repositoryType.getSimpleName() + "TestProxy";
+            case "hashCode" -> System.identityHashCode(proxy);
+            case "equals" -> proxy == args[0];
+            default -> throw unexpected(method);
+        };
+    }
+
+    private UnsupportedOperationException unexpected(Method method) {
+        return new UnsupportedOperationException("Unexpected repository call: " + method.getName());
+    }
+
+    @FunctionalInterface
+    private interface RepositoryCall {
+        Object invoke(Method method, Object[] args);
     }
 }

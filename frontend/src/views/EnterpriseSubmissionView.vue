@@ -286,7 +286,7 @@
 </template>
 
 <script setup>
-import { reactive, ref, onMounted, computed, watch } from 'vue'
+import { reactive, ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import http from '../api/http'
@@ -307,6 +307,7 @@ const submissionVersion = ref(null)
 const attachments = ref([])
 const dirty = ref(false)
 const suppressDirty = ref(false)
+const hydratingForm = ref(false)
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
@@ -552,38 +553,44 @@ const listEquals = (a = [], b = []) => {
 }
 
 const fillForm = async (data) => {
+  hydratingForm.value = true
   suppressDirty.value = true
-  submissionId.value = data.submissionId
-  submissionVersion.value = data.version ?? null
-  formStatus.value = data.status
-  detailReviewActionLabel.value = data.reviewActionLabel || ''
-  detailReviewHandledAt.value = data.reviewHandledAt || ''
-  approvalComment.value = data.reviewComment || ''
-  form.basicInfo = data.basicInfo || {}
-  form.deviceInfo = {
-    selectedProcesses: data.deviceInfo?.selectedProcesses || [],
-    selectedEquipments: data.deviceInfo?.selectedEquipments || [],
-    infoDevices: data.deviceInfo?.infoDevices || [],
-    otherProcess: data.deviceInfo?.otherProcess || '',
-    otherEquipment: data.deviceInfo?.otherEquipment || '',
-    otherInfoDevice: data.deviceInfo?.otherInfoDevice || ''
+  try {
+    submissionId.value = data.submissionId
+    submissionVersion.value = data.version ?? null
+    formStatus.value = data.status
+    detailReviewActionLabel.value = data.reviewActionLabel || ''
+    detailReviewHandledAt.value = data.reviewHandledAt || ''
+    approvalComment.value = data.reviewComment || ''
+    form.basicInfo = data.basicInfo || {}
+    form.deviceInfo = {
+      selectedProcesses: data.deviceInfo?.selectedProcesses || [],
+      selectedEquipments: data.deviceInfo?.selectedEquipments || [],
+      infoDevices: data.deviceInfo?.infoDevices || [],
+      otherProcess: data.deviceInfo?.otherProcess || '',
+      otherEquipment: data.deviceInfo?.otherEquipment || '',
+      otherInfoDevice: data.deviceInfo?.otherInfoDevice || ''
+    }
+    form.digitalInfo = {
+      digitalSystems: data.digitalInfo?.digitalSystems || [],
+      otherSystem: data.digitalInfo?.otherSystem || ''
+    }
+    form.rdToolInfo = {
+      rdTools: data.rdToolInfo?.rdTools || [],
+      otherTool: data.rdToolInfo?.otherTool || ''
+    }
+    attachments.value = data.attachments || []
+    if (!`${form.basicInfo.industryCode || ''}`.trim()) {
+      await syncIndustryCodeByEnterpriseName()
+    }
+    await loadProcesses()
+    await loadEquipments()
+    await nextTick()
+    dirty.value = false
+  } finally {
+    suppressDirty.value = false
+    hydratingForm.value = false
   }
-  form.digitalInfo = {
-    digitalSystems: data.digitalInfo?.digitalSystems || [],
-    otherSystem: data.digitalInfo?.otherSystem || ''
-  }
-  form.rdToolInfo = {
-    rdTools: data.rdToolInfo?.rdTools || [],
-    otherTool: data.rdToolInfo?.otherTool || ''
-  }
-  attachments.value = data.attachments || []
-  if (!`${form.basicInfo.industryCode || ''}`.trim()) {
-    await syncIndustryCodeByEnterpriseName()
-  }
-  await loadProcesses()
-  await loadEquipments()
-  dirty.value = false
-  suppressDirty.value = false
 }
 
 const appendOtherOption = (options) => {
@@ -784,6 +791,7 @@ const loadEquipments = async () => {
 watch(
   () => form.basicInfo.industryCode,
   async (val, oldVal) => {
+    if (hydratingForm.value) return
     const next = `${val || ''}`.trim()
     const prev = `${oldVal || ''}`.trim()
     if (next === prev) return
@@ -796,6 +804,7 @@ watch(
 watch(
   () => form.deviceInfo.selectedProcesses,
   async () => {
+    if (hydratingForm.value) return
     if (!form.deviceInfo.selectedProcesses?.includes(OTHER_OPTION)) {
       form.deviceInfo.otherProcess = ''
     }

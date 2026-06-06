@@ -109,7 +109,7 @@ function getActionDialogConfig(action) {
     return {
       title: '审批通过',
       message: '请确认发送内容',
-      inputValue: '新型技改城市项目材料审核通过',
+      inputValue: '新型技术改造城市试点数字化技术改造评估认定材料审核通过',
       inputPlaceholder: '请输入发送内容',
       confirmButtonText: '确认发送'
     }
