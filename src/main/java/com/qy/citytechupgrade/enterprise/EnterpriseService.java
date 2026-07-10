@@ -1,6 +1,7 @@
 package com.qy.citytechupgrade.enterprise;
 
 import com.qy.citytechupgrade.common.exception.BizException;
+import com.qy.citytechupgrade.common.security.CurrentUser;
 import com.qy.citytechupgrade.industry.IndustryProcessMap;
 import com.qy.citytechupgrade.industry.IndustryProcessMapRepository;
 import lombok.RequiredArgsConstructor;
@@ -10,6 +11,8 @@ import org.springframework.util.StringUtils;
 @Service
 @RequiredArgsConstructor
 public class EnterpriseService {
+    private static final String RESIDENT_ID_CARD_CERT_TYPE = "10";
+
     private final EnterpriseProfileRepository enterpriseProfileRepository;
     private final QfClientService qfClientService;
     private final IndustryProcessMapRepository industryProcessMapRepository;
@@ -22,6 +25,27 @@ public class EnterpriseService {
             enterpriseProfileRepository.save(profile);
         }
         return EnterpriseProfileVO.from(profile);
+    }
+
+    public EnterpriseProfileVO getCurrentEnterpriseProfile(CurrentUser currentUser) {
+        return EnterpriseProfileVO.from(findCurrentEnterprise(currentUser));
+    }
+
+    public EnterpriseProfileVO updateCurrentEnterpriseContact(CurrentUser currentUser, EnterpriseContactUpdateRequest request) {
+        String contactName = trimToNull(request == null ? null : request.getContactName());
+        if (!StringUtils.hasText(contactName)) {
+            throw new BizException("推送消息联系人不能为空");
+        }
+        String contactCertNo = trimToNull(request.getContactCertNo());
+        if (!StringUtils.hasText(contactCertNo)) {
+            throw new BizException("联系人身份证号不能为空");
+        }
+
+        EnterpriseProfile profile = findCurrentEnterprise(currentUser);
+        profile.setContactName(contactName);
+        profile.setContactCertNo(contactCertNo);
+        profile.setContactCertType(RESIDENT_ID_CARD_CERT_TYPE);
+        return EnterpriseProfileVO.from(enterpriseProfileRepository.save(profile));
     }
 
     public EnterpriseProfile findByIdOrThrow(Long id) {
@@ -101,6 +125,20 @@ public class EnterpriseService {
             return null;
         }
         return surveyEnterpriseRepository.findFirstByEnterpriseNameOrderByIdAsc(name).orElse(null);
+    }
+
+    private EnterpriseProfile findCurrentEnterprise(CurrentUser currentUser) {
+        if (currentUser == null || currentUser.getEnterpriseId() == null) {
+            throw new BizException("当前用户未绑定企业");
+        }
+        return findByIdOrThrow(currentUser.getEnterpriseId());
+    }
+
+    private String trimToNull(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        return value.trim();
     }
 
     public record SurveyEnterpriseCodeInfo(

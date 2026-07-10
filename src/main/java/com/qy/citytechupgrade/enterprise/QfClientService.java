@@ -25,7 +25,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
 @Service
 @RequiredArgsConstructor
@@ -36,6 +38,7 @@ public class QfClientService {
     private final CryptoUtils cryptoUtils;
     private final AppProperties appProperties;
 
+    private final Object tokenLock = new Object();
     private String cachedToken;
     private LocalDateTime tokenExpireAt;
 
@@ -80,7 +83,7 @@ public class QfClientService {
             params.get("deptname"), params.get("bizType"), params.get("bizNo"), params.get("jsonBody_associationList"));
 
         String token = getToken(baseUrl, policyName, policyPwd);
-        String raw = callAccess(baseUrl, token, apiName, params, policyPwd);
+        String raw = callAccess(baseUrl, policyName, policyPwd, token, apiName, params);
         Map<String, Object> result = parseObjectMap(raw, "解析企服站内信响应失败");
         if (!Integer.valueOf(1).equals(parseCode(result))) {
             throw new BizException("企服站内信发送失败: " + extractErrorMessage(result, raw));
@@ -98,7 +101,7 @@ public class QfClientService {
         String apiName = require(appProperties.getExternal().getQf().getEnterpriseApiName(), "app.external.qf.enterprise-api-name 未配置");
 
         String token = getToken(baseUrl, policyName, policyPwd);
-        String raw = callAccess(baseUrl, token, apiName, "creditCode=" + creditCode, policyPwd);
+        String raw = callAccess(baseUrl, policyName, policyPwd, token, apiName, "creditCode=" + creditCode);
 
         Map<String, Object> map = parseFirstObject(raw);
         EnterpriseProfile profile = new EnterpriseProfile();
@@ -136,7 +139,7 @@ public class QfClientService {
         log.info("[单点登录][企服] 已获取平台 token，token={}", token);
         String rawData = "token=" + code;
         log.info("[单点登录][企服] 使用参数 token 调用 SSO 接口，rawData={}", rawData);
-        String desRaw = callAccess(baseUrl, token, apiName, rawData, policyPwd);
+        String desRaw = callAccess(baseUrl, policyName, policyPwd, token, apiName, rawData);
         log.info("[单点登录][企服] access 接口 DES 解密后报文长度={}，内容={}", desRaw.length(), desRaw);
         String sm4CipherText = extractSsoCipherText(desRaw);
         log.info("[单点登录][企服] 已提取 SM4 密文，长度={}，内容={}", sm4CipherText.length(), sm4CipherText);
@@ -154,11 +157,23 @@ public class QfClientService {
     }
 
     private String getToken(String baseUrl, String policyName, String policyPwd) {
-        if (cachedToken != null && tokenExpireAt != null && LocalDateTime.now().isBefore(tokenExpireAt.minusMinutes(2))) {
-            log.info("[单点登录][企服] 使用缓存的平台 token，过期时间={}", tokenExpireAt);
-            return cachedToken;
+        synchronized (tokenLock) {
+            if (isCachedTokenUsable()) {
+                log.info("[单点登录][企服] 使用缓存的平台 token，过期时间={}", tokenExpireAt);
+                return cachedToken;
+            }
+            return requestNewToken(baseUrl, policyName, policyPwd);
         }
+    }
 
+    private boolean isCachedTokenUsable() {
+        if (cachedToken != null && tokenExpireAt != null && LocalDateTime.now().isBefore(tokenExpireAt.minusMinutes(2))) {
+            return true;
+        }
+        return false;
+    }
+
+    private String requestNewToken(String baseUrl, String policyName, String policyPwd) {
         String time = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH:mm:ss.SSS"));
         String sign = cryptoUtils.md5Lower32(time + policyName + policyPwd);
         log.info("[单点登录][企服] 开始请求 /token，time={}，sign={}", time, sign);
@@ -168,29 +183,37 @@ public class QfClientService {
         form.add("policyName", policyName);
         form.add("loginSign", sign);
 
-        Map<String, Object> json = postForm(baseUrl + "/token", form);
+        Map<String, Object> json = postForm(endpoint(baseUrl, "token"), form);
         log.info("[单点登录][企服] /token 响应，code={}，msg={}", json.get("code"), json.get("msg"));
         if (!Integer.valueOf(1).equals(parseCode(json))) {
-            throw new BizException("获取企服平台token失败: " + json.get("msg"));
+            throw new BizException("获取企服平台token失败: " + responseMessage(json));
         }
-        cachedToken = String.valueOf(json.get("data"));
+        Object data = json.get("data");
+        if (data == null || !StringUtils.hasText(String.valueOf(data))) {
+            throw new BizException("获取企服平台token失败: 返回token为空");
+        }
+        cachedToken = String.valueOf(data);
         tokenExpireAt = LocalDateTime.now().plusHours(2);
         log.info("[单点登录][企服] /token 调用成功，token={}，过期时间={}", cachedToken, tokenExpireAt);
         return cachedToken;
     }
 
-    private String callAccess(String baseUrl, String token, String apiName, String rawData, String policyPwd) {
-        log.info("[单点登录][企服] 开始请求 /access，apiName={}，rawData={}，token={}",
-            apiName, rawData, token);
-        MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
-        form.add("token", token);
-        form.add("apiName", apiName);
-        form.add("data", cryptoUtils.desEncrypt(rawData, policyPwd));
+    private String callAccess(String baseUrl,
+                              String policyName,
+                              String policyPwd,
+                              String token,
+                              String apiName,
+                              String rawData) {
+        Map<String, Object> json = postAccess(baseUrl, token, apiName, rawData, policyPwd);
+        if (!Integer.valueOf(1).equals(parseCode(json)) && isTokenInvalidResponse(json)) {
+            log.warn("[单点登录][企服] 平台 token 已失效，清除缓存并重新获取，apiName={}", apiName);
+            String refreshedToken = refreshTokenAfterRejected(baseUrl, policyName, policyPwd, token);
+            json = postAccess(baseUrl, refreshedToken, apiName, rawData, policyPwd);
+        }
 
-        Map<String, Object> json = postForm(baseUrl + "/access", form);
-        log.info("[单点登录][企服] /access 响应，code={}，msg={}", json.get("code"), json.get("msg"));
+        log.info("[单点登录][企服] /access 响应，code={}，msg={}", json.get("code"), responseMessage(json));
         if (!Integer.valueOf(1).equals(parseCode(json))) {
-            throw new BizException("调用企服平台接口失败: " + json.get("msg"));
+            throw new BizException("调用企服平台接口失败: " + responseMessage(json));
         }
         Object data = json.get("data");
         if (data == null) {
@@ -201,12 +224,69 @@ public class QfClientService {
         return decrypted;
     }
 
+    private Map<String, Object> postAccess(String baseUrl,
+                                           String token,
+                                           String apiName,
+                                           String rawData,
+                                           String policyPwd) {
+        log.info("[单点登录][企服] 开始请求 /access，apiName={}，rawData={}，token={}",
+            apiName, rawData, token);
+        MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
+        form.add("token", token);
+        form.add("apiName", apiName);
+        form.add("data", cryptoUtils.desEncrypt(rawData, policyPwd));
+
+        return postForm(endpoint(baseUrl, "access"), form);
+    }
+
     private String callAccess(String baseUrl,
+                              String policyName,
+                              String policyPwd,
                               String token,
                               String apiName,
-                              Map<String, String> rawParams,
-                              String policyPwd) {
-        return callAccess(baseUrl, token, apiName, buildRawData(rawParams, true), policyPwd);
+                              Map<String, String> rawParams) {
+        return callAccess(baseUrl, policyName, policyPwd, token, apiName, buildRawData(rawParams, true));
+    }
+
+    private String refreshTokenAfterRejected(String baseUrl,
+                                             String policyName,
+                                             String policyPwd,
+                                             String rejectedToken) {
+        synchronized (tokenLock) {
+            if (isCachedTokenUsable() && !Objects.equals(cachedToken, rejectedToken)) {
+                log.info("[单点登录][企服] 其他请求已刷新平台 token，复用最新 token");
+                return cachedToken;
+            }
+            cachedToken = null;
+            tokenExpireAt = null;
+            return requestNewToken(baseUrl, policyName, policyPwd);
+        }
+    }
+
+    private boolean isTokenInvalidResponse(Map<String, Object> json) {
+        String message = responseMessage(json).toLowerCase(Locale.ROOT);
+        boolean mentionsToken = message.contains("令牌") || message.contains("token");
+        boolean invalid = message.contains("失效")
+            || message.contains("过期")
+            || message.contains("invalid")
+            || message.contains("expired");
+        return mentionsToken && invalid;
+    }
+
+    private String responseMessage(Map<String, Object> json) {
+        Object msg = json.get("msg");
+        if (msg != null && StringUtils.hasText(String.valueOf(msg))) {
+            return String.valueOf(msg);
+        }
+        Object message = json.get("message");
+        if (message != null && StringUtils.hasText(String.valueOf(message))) {
+            return String.valueOf(message);
+        }
+        return "未知错误";
+    }
+
+    private String endpoint(String baseUrl, String path) {
+        return baseUrl.endsWith("/") ? baseUrl + path : baseUrl + "/" + path;
     }
 
     private Map<String, Object> postForm(String url, MultiValueMap<String, String> form) {

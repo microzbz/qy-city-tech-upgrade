@@ -23,7 +23,15 @@
           </nav>
 
           <div class="brand-right">
-            <span class="user-name">{{ auth.userInfo?.displayName }}</span>
+            <button
+              v-if="isEnterpriseUser"
+              type="button"
+              class="user-name user-name-button"
+              @click="openEnterpriseDialog"
+            >
+              {{ auth.userInfo?.displayName }}
+            </button>
+            <span v-else class="user-name">{{ auth.userInfo?.displayName }}</span>
             <el-button class="logout-btn" @click="logout">退出</el-button>
           </div>
         </div>
@@ -35,25 +43,163 @@
         <router-view />
       </main>
     </div>
+
+    <el-dialog
+      v-model="enterpriseDialogVisible"
+      title="企业信息"
+      width="min(640px, 92vw)"
+      @closed="resetEnterpriseDialog"
+    >
+      <el-skeleton v-if="enterpriseLoading" :rows="5" animated />
+      <el-form
+        v-else
+        ref="enterpriseFormRef"
+        :model="enterpriseForm"
+        :rules="enterpriseRules"
+        label-width="140px"
+        class="enterprise-profile-form"
+      >
+        <el-form-item label="企业名称">
+          <el-input :model-value="enterpriseProfile.enterpriseName || ''" disabled />
+        </el-form-item>
+        <el-form-item label="统一信用代码">
+          <el-input :model-value="enterpriseProfile.creditCode || ''" disabled />
+        </el-form-item>
+        <el-form-item label="法定代表人">
+          <el-input :model-value="enterpriseProfile.legalPerson || ''" disabled />
+        </el-form-item>
+        <el-form-item label="联系电话">
+          <el-input :model-value="enterpriseProfile.contactPhone || ''" disabled />
+        </el-form-item>
+        <el-form-item label="推送消息联系人" prop="contactName">
+          <el-input v-model.trim="enterpriseForm.contactName" maxlength="128" show-word-limit />
+        </el-form-item>
+        <el-form-item label="联系人身份证号" prop="contactCertNo">
+          <el-input
+            :model-value="contactCertNoDisplayValue"
+            @focus="contactCertNoEditing = true"
+            @blur="contactCertNoEditing = false"
+            @update:model-value="onContactCertNoInput"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="enterpriseDialogVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="enterpriseSaving"
+          :disabled="enterpriseLoading"
+          @click="saveEnterpriseContact"
+        >
+          保存
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { useAuthStore } from '../stores/auth'
+import http from '../api/http'
 
 const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
 
 const topMenus = computed(() => auth.menus || [])
+const isEnterpriseUser = computed(() => auth.roles.includes('ENTERPRISE_USER'))
+const enterpriseDialogVisible = ref(false)
+const enterpriseLoading = ref(false)
+const enterpriseSaving = ref(false)
+const enterpriseFormRef = ref(null)
+const enterpriseProfile = ref({})
+const contactCertNoEditing = ref(false)
+const enterpriseForm = reactive({
+  contactName: '',
+  contactCertNo: ''
+})
+const validateContactCertNoRequired = (_rule, value, callback) => {
+  if (!`${value || ''}`.trim()) {
+    callback(new Error('请输入联系人身份证号'))
+    return
+  }
+  callback()
+}
+const enterpriseRules = {
+  contactName: [{ required: true, message: '请输入推送消息联系人', trigger: 'blur' }],
+  contactCertNo: [{ required: true, validator: validateContactCertNoRequired, trigger: 'blur' }]
+}
+const contactCertNoDisplayValue = computed(() => {
+  if (contactCertNoEditing.value) {
+    return enterpriseForm.contactCertNo
+  }
+  return maskContactCertNo(enterpriseForm.contactCertNo)
+})
 
 const go = (path) => {
   router.push(path)
 }
 
 const isActive = (path) => route.path === path
+
+const loadEnterpriseProfile = async () => {
+  enterpriseLoading.value = true
+  try {
+    const res = await http.get('/enterprise/profile/current')
+    enterpriseProfile.value = res.data || {}
+    enterpriseForm.contactName = enterpriseProfile.value.contactName || ''
+    enterpriseForm.contactCertNo = enterpriseProfile.value.contactCertNo || ''
+  } finally {
+    enterpriseLoading.value = false
+  }
+}
+
+const openEnterpriseDialog = async () => {
+  enterpriseDialogVisible.value = true
+  await loadEnterpriseProfile()
+}
+
+const resetEnterpriseDialog = () => {
+  contactCertNoEditing.value = false
+  enterpriseFormRef.value?.clearValidate()
+}
+
+const maskContactCertNo = (value) => {
+  const certNo = `${value || ''}`
+  if (certNo.length <= 10) {
+    return certNo
+  }
+  return `${certNo.slice(0, 6)}********${certNo.slice(-4)}`
+}
+
+const onContactCertNoInput = (value) => {
+  enterpriseForm.contactCertNo = `${value || ''}`
+}
+
+const saveEnterpriseContact = async () => {
+  try {
+    await enterpriseFormRef.value?.validate()
+  } catch {
+    return
+  }
+  enterpriseSaving.value = true
+  try {
+    const res = await http.put('/enterprise/profile/current/contact', {
+      contactName: enterpriseForm.contactName,
+      contactCertNo: enterpriseForm.contactCertNo
+    })
+    enterpriseProfile.value = res.data || {}
+    enterpriseForm.contactName = enterpriseProfile.value.contactName || ''
+    enterpriseForm.contactCertNo = enterpriseProfile.value.contactCertNo || ''
+    ElMessage.success('保存成功')
+    enterpriseDialogVisible.value = false
+  } finally {
+    enterpriseSaving.value = false
+  }
+}
 
 const logout = () => {
   auth.logout()
@@ -132,16 +278,33 @@ const logout = () => {
 }
 
 .user-name {
+  max-width: 220px;
   height: 36px;
   padding: 0 12px;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   border-radius: 4px;
   border: 1px solid #f1c689;
   background: #fff8ef;
   color: #9e5d0b;
   font-weight: 700;
   font-size: 16px;
+}
+
+.user-name-button {
+  appearance: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.user-name-button:hover {
+  border-color: #e8780a;
+  background: #fff1de;
+  color: #8f4f05;
 }
 
 .top-nav-inline {
@@ -201,6 +364,10 @@ const logout = () => {
 .content {
   flex: 1;
   min-width: 0;
+}
+
+.enterprise-profile-form {
+  padding-right: 8px;
 }
 
 @media (max-width: 1100px) {
